@@ -1,0 +1,3 @@
+sample,normal_bam,normal_bai,tumor_bam,tumor_bai
+patient1,/path/to/patient1_normal.bam,/path/to/patient1_normal.bam.bai,/path/to/patient1_tumor.bam,/path/to/patient1_tumor.bam.bai
+patient2,/path/to/patient2_normal.bam,/path/to/patient2_normal.bam.bai,/path/to/patient2_tumor.bam,/path/to/patient2_tumor.bam.bai
