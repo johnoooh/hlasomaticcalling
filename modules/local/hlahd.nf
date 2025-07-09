@@ -34,7 +34,6 @@ process HLAHD {
     def fastq1 = fastq_files[0]
     def fastq2 = fastq_files.size() > 1 ? fastq_files[1] : ""
     """
-    # Convert BAM to FASTQ for HLAHD
     
     // # Run HLAHD
     // hlahd.sh \\
