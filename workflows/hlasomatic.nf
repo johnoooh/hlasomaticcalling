@@ -11,6 +11,9 @@ include { SAMTOOLS_FAIDX         } from '../modules/nf-core/samtools/faidx/main'
 include { SAMTOOLS_FASTQ         } from '../modules/nf-core/samtools/fastq/main'
 include { GATK4_MUTECT2          } from '../modules/nf-core/gatk4/mutect2/main'
 include { STRELKA_SOMATIC        } from '../modules/nf-core/strelka/somatic/main'
+include { GATK4_CREATESEQUENCEDICTIONARY } from '../modules/nf-core/gatk4/createsequencedictionary/main'
+include { CREATE_HLA_REFERENCE } from '../modules/local/create_hla_reference'
+
 include { MULTIQC                } from '../modules/nf-core/multiqc/main'
 include { paramsSummaryMap       } from 'plugin/nf-schema'
 include { paramsSummaryMultiqc   } from '../subworkflows/nf-core/utils_nfcore_pipeline'
@@ -36,17 +39,8 @@ workflow HLASOMATIC {
     // Prepare reference files
     //
     ch_reference = Channel.fromPath(params.fasta, checkIfExists: true)
+    ch_reference_fai = Channel.fromPath(params.fastafai, checkIfExists: true)
     ch_hlahd_db = Channel.fromPath(params.hlahd_db, checkIfExists: true)
-    
-
-    ch_reference.view()
-    // Index reference fasta
-    SAMTOOLS_FAIDX (
-        ch_reference.map { fasta -> [[id: 'reference'], fasta] },
-        [[id: 'reference'], []],                                                 // Channel 2: Empty fai input 
-        true                                                       // Channel 3: get_sizes parameter
-    )
-    ch_versions = ch_versions.mix(SAMTOOLS_FAIDX.out.versions.first())
 
     //
     // Parse input samplesheet - now expects normal_bam, normal_bai, tumor_bam, tumor_bai
@@ -90,21 +84,36 @@ workflow HLASOMATIC {
         ch_normal_fastq,
         ch_hlahd_db,
         ch_reference,
-        SAMTOOLS_FAIDX.out.fai.map { meta, fai -> fai }
+        ch_reference_fai
     )
+
     ch_versions = ch_versions.mix(HLAHD.out.versions.first())
 
+    
     //
     // Create HLA reference fastas and index them
     //
     ch_hla_calls = HLAHD.out.hla_calls
-    
+    ch_hla_calls.view()
+
+    CREATE_HLA_REFERENCE ( 
+        ch_hla_calls, 
+        ch_reference
+    )
+    CREATE_HLA_REFERENCE.out.hla_reference.view()
+
+    SAMTOOLS_FAIDX (
+        CREATE_HLA_REFERENCE.out.hla_reference,
+        [[id: 'patient1_normal'], []],                                                 // Channel 2: Empty fai input 
+        true                                                       // Channel 3: get_sizes parameter
+    )
     // Create personalized HLA reference (this would need a custom process)
     // For now, we'll use the original reference and proceed with realignment
     
     BWA_INDEX (
-        ch_reference.map { fasta -> [[id: 'reference'], fasta] }
+        CREATE_HLA_REFERENCE.out.hla_reference,
     )
+
     ch_versions = ch_versions.mix(BWA_INDEX.out.versions.first())
 
     BWA_INDEX.out.index.view { "BWA_INDEX output: $it" }
@@ -112,10 +121,23 @@ workflow HLASOMATIC {
 
     bwaindex    = BWA_INDEX.out.index
 
+    GATK4_CREATESEQUENCEDICTIONARY (
+        CREATE_HLA_REFERENCE.out.hla_reference
+    )
+
+    ch_bwa_input = SAMTOOLS_FASTQ.out.fastq
+    .combine(BWA_INDEX.out.index)
+    .combine(CREATE_HLA_REFERENCE.out.hla_reference.map { fasta -> [[id: 'normal'], fasta] })
+
+    ch_bwa_index = BWA_INDEX.out.index
+
+    // ch_reference_meta = CREATE_HLA_REFERENCE.out.hla_reference.map { fasta -> [[id: 'reference'], fasta] }.first()
+
+
     BWA_MEM (
         SAMTOOLS_FASTQ.out.fastq,
-        BWA_INDEX.out.index,
-        ch_reference.map { fasta -> [[id: 'reference'], fasta] },
+        ch_bwa_index,
+        CREATE_HLA_REFERENCE.out.hla_reference,
         true
     )
     ch_versions = ch_versions.mix(BWA_MEM.out.versions.first())
@@ -157,7 +179,9 @@ workflow HLASOMATIC {
             [meta, tumor_bam, tumor_bai, normal_bam, normal_bai]
         }
 
-    ch_tumor_normal_pairs.view()
+    ch_tumor_normal_pairs.count().view { "Number of tumor-normal pairs: $it" }
+    ch_tumor_normal_pairs.view { "Tumor-normal pairs: $it" }
+
     //
     // MODULE: Run Mutect2 for somatic mutation calling
     //
@@ -165,9 +189,9 @@ workflow HLASOMATIC {
         ch_tumor_normal_pairs.map { meta, tumor_bam, tumor_bai, normal_bam, normal_bai ->
             [meta, [tumor_bam, normal_bam], [tumor_bai, normal_bai], []]
         },
-        ch_reference.map { fasta -> [[id: 'reference'], fasta] },
+        CREATE_HLA_REFERENCE.out.hla_reference,
         SAMTOOLS_FAIDX.out.fai.map { meta, fai -> [[id: 'reference'], fai] },
-        [],
+        GATK4_CREATESEQUENCEDICTIONARY.out.dict.map { meta, dict -> [[id: 'reference'], dict] }.first(),
         [],
         [],
         [],
