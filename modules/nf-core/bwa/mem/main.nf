@@ -37,7 +37,8 @@ process BWA_MEM {
     if (!fasta && extension=="cram") error "Fasta reference is required for CRAM output"
     """
     INDEX=`find -L ./ -name "*.amb" | sed 's/\\.amb\$//'`
-
+    ls -l 
+    echo \$INDEX
     bwa mem \\
         $args \\
         -t $task.cpus \\

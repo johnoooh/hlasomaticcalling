@@ -1,6 +1,6 @@
 process HLAHD {
     tag "${meta.id}"
-    label 'process_high'
+    // label 'process_high'
 
     container = "cmopipeline/hlahd:1.4"
     scratch = true
@@ -34,19 +34,7 @@ process HLAHD {
     def fastq1 = fastq_files[0]
     def fastq2 = fastq_files.size() > 1 ? fastq_files[1] : ""
     """
-    
-    // # Run HLAHD
-    // hlahd.sh \\
-    //     -t ${task.cpus} \\
-    //     -m 100 \\
-    //     -c 0.95 \\
-    //     ${args} \\
-    //     ${prefix}_R1.fastq \\
-    //     ${prefix}_R2.fastq \\
-    //     ${hlahd_db}/HLA_gene.split.txt \\
-    //     ${hlahd_db}/dictionary \\
-    //     ${prefix} \\
-    //     ${reference_fasta}
+
 
     install_dir=/hlahd.1.4.0
 

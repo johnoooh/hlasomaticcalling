@@ -2,7 +2,7 @@ process BWA_INDEX {
     tag "$fasta"
     // NOTE requires 5.37N memory where N is the size of the database
     // source: https://bio-bwa.sourceforge.net/bwa.shtml#8
-    memory { 6.B * fasta.size() }
+    label 'process_low'
 
     conda "${moduleDir}/environment.yml"
     container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
@@ -24,6 +24,7 @@ process BWA_INDEX {
     def args   = task.ext.args ?: ''
     """
     mkdir bwa
+    ls -l 
     bwa \\
         index \\
         $args \\

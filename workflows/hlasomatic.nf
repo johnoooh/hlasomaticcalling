@@ -38,21 +38,32 @@ workflow HLASOMATIC {
     ch_reference = Channel.fromPath(params.fasta, checkIfExists: true)
     ch_hlahd_db = Channel.fromPath(params.hlahd_db, checkIfExists: true)
     
+
+    ch_reference.view()
     // Index reference fasta
     SAMTOOLS_FAIDX (
-        ch_reference.map { fasta -> [[id: 'reference'], fasta] }
+        ch_reference.map { fasta -> [[id: 'reference'], fasta] },
+        [[id: 'reference'], []],                                                 // Channel 2: Empty fai input 
+        true                                                       // Channel 3: get_sizes parameter
     )
     ch_versions = ch_versions.mix(SAMTOOLS_FAIDX.out.versions.first())
 
     //
     // Parse input samplesheet - now expects normal_bam, normal_bai, tumor_bam, tumor_bai
     //
-    ch_normal_bams = ch_samplesheet.map { meta, normal_bam, normal_bai, tumor_bam, tumor_bai ->
+    ch_samplesheet.view()
+    ch_normal_bams = ch_samplesheet.map { row ->
+        def meta = row[0]
+        def normal_bam = row[1]
+        def normal_bai = row[2]
         def normal_meta = meta + [sample_type: 'normal', id: "${meta.id}_normal"]
         [normal_meta, normal_bam, normal_bai]
     }
-    
-    ch_tumor_bams = ch_samplesheet.map { meta, normal_bam, normal_bai, tumor_bam, tumor_bai ->
+    ch_samplesheet.view()
+    ch_tumor_bams = ch_samplesheet.map { row ->
+        def meta = row[0]
+        def tumor_bam = row[3]
+        def tumor_bai = row[4]
         def tumor_meta = meta + [sample_type: 'tumor', id: "${meta.id}_tumor"]
         [tumor_meta, tumor_bam, tumor_bai]
     }
@@ -68,6 +79,7 @@ workflow HLASOMATIC {
     )
     ch_versions = ch_versions.mix(SAMTOOLS_FASTQ.out.versions.first())
 
+    SAMTOOLS_FASTQ.out.fastq.view()
     //
     // MODULE: Run HLAHD on normal samples using FASTQ files
     //
@@ -95,12 +107,14 @@ workflow HLASOMATIC {
     )
     ch_versions = ch_versions.mix(BWA_INDEX.out.versions.first())
 
-    //
-    // Realign both tumor and normal samples using converted FASTQ files
-    //
+    BWA_INDEX.out.index.view { "BWA_INDEX output: $it" }
+    SAMTOOLS_FASTQ.out.fastq.view { "SAMTOOLS_FASTQ output: $it" }
+
+    bwaindex    = BWA_INDEX.out.index
+
     BWA_MEM (
         SAMTOOLS_FASTQ.out.fastq,
-        BWA_INDEX.out.index.map { meta, index -> index },
+        BWA_INDEX.out.index,
         ch_reference.map { fasta -> [[id: 'reference'], fasta] },
         true
     )
@@ -118,6 +132,8 @@ workflow HLASOMATIC {
     ch_realigned_bams = BWA_MEM.out.bam
         .join(SAMTOOLS_INDEX.out.bai, by: [0])
     
+    ch_realigned_bams.view()
+
     // Get tumor realigned BAMs
     ch_tumor_realigned = ch_realigned_bams
         .filter { meta, bam, bai -> meta.sample_type == 'tumor' }
@@ -141,6 +157,7 @@ workflow HLASOMATIC {
             [meta, tumor_bam, tumor_bai, normal_bam, normal_bai]
         }
 
+    ch_tumor_normal_pairs.view()
     //
     // MODULE: Run Mutect2 for somatic mutation calling
     //
