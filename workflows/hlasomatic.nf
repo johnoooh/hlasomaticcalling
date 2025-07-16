@@ -13,7 +13,7 @@ include { GATK4_MUTECT2          } from '../modules/nf-core/gatk4/mutect2/main'
 include { STRELKA_SOMATIC        } from '../modules/nf-core/strelka/somatic/main'
 include { GATK4_CREATESEQUENCEDICTIONARY } from '../modules/nf-core/gatk4/createsequencedictionary/main'
 include { CREATE_HLA_REFERENCE } from '../modules/local/create_hla_reference'
-
+include { BWA_MEM_CUSTOM } from '../modules/local/bwa_mem_custom'
 include { MULTIQC                } from '../modules/nf-core/multiqc/main'
 include { paramsSummaryMap       } from 'plugin/nf-schema'
 include { paramsSummaryMultiqc   } from '../subworkflows/nf-core/utils_nfcore_pipeline'
@@ -104,8 +104,8 @@ workflow HLASOMATIC {
 
     SAMTOOLS_FAIDX (
         CREATE_HLA_REFERENCE.out.hla_reference,
-        [[id: 'patient1_normal'], []],                                                 // Channel 2: Empty fai input 
-        true                                                       // Channel 3: get_sizes parameter
+        CREATE_HLA_REFERENCE.out.hla_reference.map { meta, fasta -> [meta, []] },     // Channel 2: Empty fai input with correct meta
+        true                                                                           // Channel 3: get_sizes parameter
     )
     // Create personalized HLA reference (this would need a custom process)
     // For now, we'll use the original reference and proceed with realignment
@@ -122,7 +122,7 @@ workflow HLASOMATIC {
     bwaindex    = BWA_INDEX.out.index
 
     GATK4_CREATESEQUENCEDICTIONARY (
-        CREATE_HLA_REFERENCE.out.hla_reference
+        ch_reference.map { fasta -> [[id: 'reference'], fasta] }
     )
 
     ch_bwa_input = SAMTOOLS_FASTQ.out.fastq
@@ -131,15 +131,38 @@ workflow HLASOMATIC {
 
     ch_bwa_index = BWA_INDEX.out.index
 
-    // ch_reference_meta = CREATE_HLA_REFERENCE.out.hla_reference.map { fasta -> [[id: 'reference'], fasta] }.first()
+    ch_fastq_with_patient = SAMTOOLS_FASTQ.out.fastq.map { meta, fastq ->
+        def patient_id = meta.id.replace('_normal', '').replace('_tumor', '')
+        [patient_id, meta, fastq]
+    }
+
+    ch_bwa_index_with_patient = BWA_INDEX.out.index.map { meta, index ->
+        def patient_id = meta.id.replace('_normal', '')
+        [patient_id, index]
+    }
+    
+    ch_hla_ref_with_patient = CREATE_HLA_REFERENCE.out.hla_reference.map { meta, fasta ->
+        def patient_id = meta.id.replace('_normal', '')
+        [patient_id, fasta]
+    }
+
+    // Join all channels by patient ID to create complete alignment input
+    ch_alignment_input = ch_fastq_with_patient
+        .combine(ch_bwa_index_with_patient, by: 0)
+        .combine(ch_hla_ref_with_patient, by: 0)
+        .map { patient_id, sample_meta, fastq, index, fasta ->
+            [sample_meta, fastq, index, fasta]
+        }
+
 
 
     BWA_MEM (
-        SAMTOOLS_FASTQ.out.fastq,
-        ch_bwa_index,
-        CREATE_HLA_REFERENCE.out.hla_reference,
+        ch_alignment_input.map { sample_meta, fastq, index, fasta -> [sample_meta, fastq] },
+        ch_alignment_input.map { sample_meta, fastq, index, fasta -> [['id': 'bwa_index'], index] }.first(),
+        ch_alignment_input.map { sample_meta, fastq, index, fasta -> [['id': 'hla_reference'], fasta] }.first(),
         true
     )
+
     ch_versions = ch_versions.mix(BWA_MEM.out.versions.first())
 
     // Index realigned BAMs
@@ -148,9 +171,9 @@ workflow HLASOMATIC {
     )
     ch_versions = ch_versions.mix(SAMTOOLS_INDEX.out.versions.first())
 
-    //
+    
     // Prepare tumor-normal pairs for somatic calling
-    //
+    
     ch_realigned_bams = BWA_MEM.out.bam
         .join(SAMTOOLS_INDEX.out.bai, by: [0])
     
@@ -165,7 +188,7 @@ workflow HLASOMATIC {
     ch_normal_realigned = ch_realigned_bams
         .filter { meta, bam, bai -> meta.sample_type == 'normal' }
         .map { meta, bam, bai -> [meta.id.replace('_normal', ''), meta, bam, bai] }
-    
+
     // Join tumor and normal for each sample
     ch_tumor_normal_pairs = ch_tumor_realigned
         .join(ch_normal_realigned)
@@ -189,8 +212,8 @@ workflow HLASOMATIC {
         ch_tumor_normal_pairs.map { meta, tumor_bam, tumor_bai, normal_bam, normal_bai ->
             [meta, [tumor_bam, normal_bam], [tumor_bai, normal_bai], []]
         },
-        CREATE_HLA_REFERENCE.out.hla_reference,
-        SAMTOOLS_FAIDX.out.fai.map { meta, fai -> [[id: 'reference'], fai] },
+        ch_reference.map { fasta -> [[id: 'reference'], fasta] },
+        ch_reference_fai.map { fai -> [[id: 'reference'], fai] },
         GATK4_CREATESEQUENCEDICTIONARY.out.dict.map { meta, dict -> [[id: 'reference'], dict] }.first(),
         [],
         [],
@@ -207,7 +230,7 @@ workflow HLASOMATIC {
             [meta, normal_bam, normal_bai, tumor_bam, tumor_bai, [], [], [], []]
         },
         ch_reference,
-        SAMTOOLS_FAIDX.out.fai.map { meta, fai -> fai }
+        ch_reference_fai
     )
     ch_versions = ch_versions.mix(STRELKA_SOMATIC.out.versions.first())
 
@@ -267,9 +290,9 @@ workflow HLASOMATIC {
     multiqc_report = MULTIQC.out.report.toList() // channel: /path/to/multiqc_report.html
     versions       = ch_versions                 // channel: [ path(versions.yml) ]
     hla_calls      = HLAHD.out.hla_calls        // channel: HLA typing results
-    mutect2_vcf    = GATK4_MUTECT2.out.vcf      // channel: Mutect2 VCF files
-    strelka_snvs   = STRELKA_SOMATIC.out.vcf_snvs    // channel: Strelka SNV VCF files
-    strelka_indels = STRELKA_SOMATIC.out.vcf_indels  // channel: Strelka indel VCF files
+    // mutect2_vcf    = GATK4_MUTECT2.out.vcf      // channel: Mutect2 VCF files
+    // strelka_snvs   = STRELKA_SOMATIC.out.vcf_snvs    // channel: Strelka SNV VCF files
+    // strelka_indels = STRELKA_SOMATIC.out.vcf_indels  // channel: Strelka indel VCF files
 
 }
 
