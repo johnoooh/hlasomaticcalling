@@ -10,8 +10,8 @@ process STRELKA_SOMATIC {
 
     input:
     tuple val(meta), path(input_normal), path(input_index_normal), path(input_tumor), path(input_index_tumor),  path(manta_candidate_small_indels), path(manta_candidate_small_indels_tbi), path(target_bed), path(target_bed_index)
-    path  fasta
-    path  fai
+    tuple val(meta2), path(fasta)
+    tuple val(meta3), path(fai)
 
     output:
     tuple val(meta), path("*.somatic_indels.vcf.gz")    , emit: vcf_indels
@@ -19,6 +19,7 @@ process STRELKA_SOMATIC {
     tuple val(meta), path("*.somatic_snvs.vcf.gz")      , emit: vcf_snvs
     tuple val(meta), path("*.somatic_snvs.vcf.gz.tbi")  , emit: vcf_snvs_tbi
     path "versions.yml"                                 , emit: versions
+    tuple val(meta), path('*strelka2.vcf.gz'), path('*strelka2.vcf.gz.tbi'), emit: strelka4Combine
 
     when:
     task.ext.when == null || task.ext.when
@@ -46,6 +47,21 @@ process STRELKA_SOMATIC {
     mv strelka/results/variants/somatic.indels.vcf.gz.tbi ${prefix}.somatic_indels.vcf.gz.tbi
     mv strelka/results/variants/somatic.snvs.vcf.gz       ${prefix}.somatic_snvs.vcf.gz
     mv strelka/results/variants/somatic.snvs.vcf.gz.tbi   ${prefix}.somatic_snvs.vcf.gz.tbi
+
+
+    echo -e 'TUMOR ${prefix}_tumor\\nNORMAL ${prefix}_normal' > samples.txt
+
+    bcftools concat \
+        --allow-overlaps \
+        ${prefix}.somatic_indels.vcf.gz ${prefix}.somatic_snvs.vcf.gz | \
+    bcftools sort | \
+    bcftools norm \
+        --fasta-ref ${fasta} \
+        --check-ref s \
+        --output-type z \
+        --output ${prefix}_strelka.vcf.gz
+
+  tabix --preset vcf ${prefix}_strelka2.vcf.gz
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":

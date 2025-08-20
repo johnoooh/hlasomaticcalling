@@ -74,7 +74,6 @@ workflow PIPELINE_INITIALISATION {
 
     Channel
         .fromList(samplesheetToList(params.input, "${projectDir}/assets/schema_input.json"))
-        .view()
         .map { meta, normal_bam, normal_bai, tumor_bam, tumor_bai ->
             return [ meta, normal_bam, normal_bai, tumor_bam, tumor_bai ]
         }

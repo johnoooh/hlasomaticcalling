@@ -1,7 +1,7 @@
 process SAMTOOLS_FASTQ {
     tag "$meta.id"
     label 'process_low'
-
+    // scratch = false
     conda "${moduleDir}/environment.yml"
     container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
         'https://depot.galaxyproject.org/singularity/samtools:1.21--h50ea8bc_0' :
@@ -29,12 +29,11 @@ process SAMTOOLS_FASTQ {
         "-1 ${prefix}_1.fastq.gz -2 ${prefix}_2.fastq.gz -s ${prefix}_singleton.fastq.gz"
     """
     # Note: --threads value represents *additional* CPUs to allocate (total CPUs = 1 + --threads).
-    samtools \\
+    samtools collate -T $prefix -u -O $input | samtools \\
         fastq \\
         $args \\
         --threads ${task.cpus-1} \\
         -0 ${prefix}_other.fastq.gz \\
-        $input \\
         $output
 
     cat <<-END_VERSIONS > versions.yml

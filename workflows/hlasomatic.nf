@@ -10,6 +10,7 @@ include { SAMTOOLS_INDEX         } from '../modules/nf-core/samtools/index/main'
 include { SAMTOOLS_FAIDX         } from '../modules/nf-core/samtools/faidx/main'
 include { SAMTOOLS_FASTQ         } from '../modules/nf-core/samtools/fastq/main'
 include { GATK4_MUTECT2          } from '../modules/nf-core/gatk4/mutect2/main'
+include { GATK4_FILTERMUTECTCALLS } from '../modules/nf-core/gatk4/filtermutectcalls/main'
 include { STRELKA_SOMATIC        } from '../modules/nf-core/strelka/somatic/main'
 include { GATK4_CREATESEQUENCEDICTIONARY } from '../modules/nf-core/gatk4/createsequencedictionary/main'
 include { CREATE_HLA_REFERENCE } from '../modules/local/create_hla_reference'
@@ -38,14 +39,14 @@ workflow HLASOMATIC {
     //
     // Prepare reference files
     //
-    ch_reference = Channel.fromPath(params.fasta, checkIfExists: true)
-    ch_reference_fai = Channel.fromPath(params.fastafai, checkIfExists: true)
-    ch_hlahd_db = Channel.fromPath(params.hlahd_db, checkIfExists: true)
+    ch_reference = Channel.value(file(params.fasta, checkIfExists: true))
+    ch_reference_fai = Channel.value(file(params.fastafai, checkIfExists: true))
+    ch_hlahd_db = Channel.value(file(params.hlahd_db, checkIfExists: true))
 
     //
     // Parse input samplesheet - now expects normal_bam, normal_bai, tumor_bam, tumor_bai
     //
-    ch_samplesheet.view()
+    // ch_samplesheet.view()
     ch_normal_bams = ch_samplesheet.map { row ->
         def meta = row[0]
         def normal_bam = row[1]
@@ -53,7 +54,7 @@ workflow HLASOMATIC {
         def normal_meta = meta + [sample_type: 'normal', id: "${meta.id}_normal"]
         [normal_meta, normal_bam, normal_bai]
     }
-    ch_samplesheet.view()
+    // ch_samplesheet.view()
     ch_tumor_bams = ch_samplesheet.map { row ->
         def meta = row[0]
         def tumor_bam = row[3]
@@ -63,6 +64,7 @@ workflow HLASOMATIC {
     }
     
     ch_all_bams = ch_normal_bams.mix(ch_tumor_bams)
+    // ch_all_bams.view()
 
     //
     // Convert BAMs to FASTQ for processing
@@ -73,18 +75,16 @@ workflow HLASOMATIC {
     )
     ch_versions = ch_versions.mix(SAMTOOLS_FASTQ.out.versions.first())
 
-    SAMTOOLS_FASTQ.out.fastq.view()
+    // SAMTOOLS_FASTQ.out.fastq.view()
     //
     // MODULE: Run HLAHD on normal samples using FASTQ files
     //
     ch_normal_fastq = SAMTOOLS_FASTQ.out.fastq
         .filter { meta, fastq -> meta.sample_type == 'normal' }
     
+    // ch_normal_fastq.view()
     HLAHD (
-        ch_normal_fastq,
-        ch_hlahd_db,
-        ch_reference,
-        ch_reference_fai
+        ch_normal_fastq
     )
 
     ch_versions = ch_versions.mix(HLAHD.out.versions.first())
@@ -94,13 +94,13 @@ workflow HLASOMATIC {
     // Create HLA reference fastas and index them
     //
     ch_hla_calls = HLAHD.out.hla_calls
-    ch_hla_calls.view()
+    // ch_hla_calls.view()
 
     CREATE_HLA_REFERENCE ( 
         ch_hla_calls, 
         ch_reference
     )
-    CREATE_HLA_REFERENCE.out.hla_reference.view()
+    // CREATE_HLA_REFERENCE.out.hla_reference.view()
 
     SAMTOOLS_FAIDX (
         CREATE_HLA_REFERENCE.out.hla_reference,
@@ -116,8 +116,8 @@ workflow HLASOMATIC {
 
     ch_versions = ch_versions.mix(BWA_INDEX.out.versions.first())
 
-    BWA_INDEX.out.index.view { "BWA_INDEX output: $it" }
-    SAMTOOLS_FASTQ.out.fastq.view { "SAMTOOLS_FASTQ output: $it" }
+    // BWA_INDEX.out.index.view { "BWA_INDEX output: $it" }
+    // SAMTOOLS_FASTQ.out.fastq.view { "SAMTOOLS_FASTQ output: $it" }
 
     bwaindex    = BWA_INDEX.out.index
 
@@ -155,11 +155,11 @@ workflow HLASOMATIC {
         }
 
 
-
+    // ch_alignment_input.view()
     BWA_MEM (
         ch_alignment_input.map { sample_meta, fastq, index, fasta -> [sample_meta, fastq] },
-        ch_alignment_input.map { sample_meta, fastq, index, fasta -> [['id': 'bwa_index'], index] }.first(),
-        ch_alignment_input.map { sample_meta, fastq, index, fasta -> [['id': 'hla_reference'], fasta] }.first(),
+        ch_alignment_input.map { sample_meta, fastq, index, fasta -> [['id': 'bwa_index'], index] },
+        ch_alignment_input.map { sample_meta, fastq, index, fasta -> [['id': 'hla_reference'], fasta] },
         true
     )
 
@@ -177,7 +177,7 @@ workflow HLASOMATIC {
     ch_realigned_bams = BWA_MEM.out.bam
         .join(SAMTOOLS_INDEX.out.bai, by: [0])
     
-    ch_realigned_bams.view()
+    // ch_realigned_bams.view()
 
     // Get tumor realigned BAMs
     ch_tumor_realigned = ch_realigned_bams
@@ -202,8 +202,8 @@ workflow HLASOMATIC {
             [meta, tumor_bam, tumor_bai, normal_bam, normal_bai]
         }
 
-    ch_tumor_normal_pairs.count().view { "Number of tumor-normal pairs: $it" }
-    ch_tumor_normal_pairs.view { "Tumor-normal pairs: $it" }
+    // ch_tumor_normal_pairs.count().view { "Number of tumor-normal pairs: $it" }
+    // ch_tumor_normal_pairs.view { "Tumor-normal pairs: $it" }
 
     //
     // MODULE: Run Mutect2 for somatic mutation calling
@@ -214,7 +214,7 @@ workflow HLASOMATIC {
         },
         ch_reference.map { fasta -> [[id: 'reference'], fasta] },
         ch_reference_fai.map { fai -> [[id: 'reference'], fai] },
-        GATK4_CREATESEQUENCEDICTIONARY.out.dict.map { meta, dict -> [[id: 'reference'], dict] }.first(),
+        GATK4_CREATESEQUENCEDICTIONARY.out.dict.map { meta, dict -> [[id: 'reference'], dict] },
         [],
         [],
         [],
@@ -222,16 +222,77 @@ workflow HLASOMATIC {
     )
     ch_versions = ch_versions.mix(GATK4_MUTECT2.out.versions.first())
 
+    // Create the input channel for GATK4_FILTERMUTECTCALLS
+    // This combines the VCF and stats outputs from MUTECT2
+    // Create the input channel for GATK4_FILTERMUTECTCALLS
+// This combines the VCF, TBI, and stats outputs from MUTECT2
+    ch_filtermutect_in = GATK4_MUTECT2.out.vcf
+    .join(GATK4_MUTECT2.out.tbi, by: 0)
+    .join(GATK4_MUTECT2.out.stats, by: 0)
+    .map { meta, vcf, tbi, stats ->
+        [
+            meta,           // meta map
+            vcf,            // VCF file
+            tbi,            // TBI index file
+            stats,          // stats file
+            [],             // orientationbias (empty - not using)
+            [],             // segmentation (empty - not using)
+            [],             // contamination table (empty - not using)
+            0.0             // contamination estimate (0.0 - not using)
+        ]
+    }
+
+GATK4_FILTERMUTECTCALLS(
+    ch_filtermutect_in,
+    ch_reference.map { fasta -> [[id: 'reference'], fasta] },
+    ch_reference_fai.map { fai -> [[id: 'reference'], fai] },
+    GATK4_CREATESEQUENCEDICTIONARY.out.dict.map { meta, dict -> [[id: 'reference'], dict] }
+)
     //
     // MODULE: Run Strelka for somatic mutation calling
     //
+
+    // Prepare personalized reference for Strelka
+    ch_hla_ref_with_patient_for_strelka = CREATE_HLA_REFERENCE.out.hla_reference.map { meta, fasta ->
+        def patient_id = meta.id.replace('_normal', '')
+        [patient_id, fasta]
+    }
+    
+    ch_hla_fai_with_patient_for_strelka = SAMTOOLS_FAIDX.out.fai.map { meta, fai ->
+        def patient_id = meta.id.replace('_normal', '')
+        [patient_id, fai]
+    }
+    // ch_hla_ref_with_patient_for_strelka.view()
+    // ch_hla_fai_with_patient_for_strelka.view()
+
+
+    ch_tumor_normal_keyed = ch_tumor_normal_pairs.map { meta, tumor_bam, tumor_bai, normal_bam, normal_bai ->
+        [meta.id, meta, tumor_bam, tumor_bai, normal_bam, normal_bai]
+    }
+
+    // Join everything together
+    ch_strelka_input = ch_tumor_normal_keyed
+        .join(ch_hla_ref_with_patient_for_strelka)
+        .join(ch_hla_fai_with_patient_for_strelka)
+        .map { patient_id, meta, tumor_bam, tumor_bai, normal_bam, normal_bai, hla_fasta, hla_fai ->
+            [meta, tumor_bam, tumor_bai, normal_bam, normal_bai, hla_fasta, hla_fai]
+        }
+    
+    // ch_strelka_input.view()
+    
     STRELKA_SOMATIC (
-        ch_tumor_normal_pairs.map { meta, tumor_bam, tumor_bai, normal_bam, normal_bai ->
-            [meta, normal_bam, normal_bai, tumor_bam, tumor_bai, [], [], [], []]
-        },
-        ch_reference,
-        ch_reference_fai
+        ch_strelka_input.map { meta, normal_bam, normal_bai, tumor_bam, tumor_bai, hla_fasta, hla_fai -> [meta, normal_bam, normal_bai, tumor_bam, tumor_bai, [], [], [], []] },
+        ch_strelka_input.map { meta, normal_bam, normal_bai, tumor_bam, tumor_bai, hla_fasta, hla_fai -> [meta, hla_fasta] },
+        ch_strelka_input.map { meta, normal_bam, normal_bai, tumor_bam, tumor_bai, hla_fasta, hla_fai -> [meta, hla_fai] }
+    
     )
+
+    SomaticCombineMutect2Vcf.out.mutect2CombinedVcfOutput.combine(bamFiles, by: [0]).combine(SomaticRunStrelka2.out.strelka4Combine, by: [0,1,2]).set{ mutectStrelkaChannel }
+    SomaticCombineChannel(mutectStrelkaChannel,
+                          Channel.value([referenceMap.genomeFile, referenceMap.genomeIndex]),
+                          Channel.value([referenceMap.repeatMasker, referenceMap.repeatMaskerIndex, referenceMap.mapabilityBlacklist, referenceMap.mapabilityBlacklistIndex]),
+                          Channel.value([referenceMap.exomePoN, referenceMap.wgsPoN,referenceMap.exomePoNIndex, referenceMap.wgsPoNIndex,]),
+                          Channel.value([referenceMap.gnomadWesVcf, referenceMap.gnomadWesVcfIndex,referenceMap.gnomadWgsVcf, referenceMap.gnomadWgsVcfIndex]))
     ch_versions = ch_versions.mix(STRELKA_SOMATIC.out.versions.first())
 
     //
