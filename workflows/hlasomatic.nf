@@ -15,6 +15,8 @@ include { STRELKA_SOMATIC        } from '../modules/nf-core/strelka/somatic/main
 include { GATK4_CREATESEQUENCEDICTIONARY } from '../modules/nf-core/gatk4/createsequencedictionary/main'
 include { CREATE_HLA_REFERENCE } from '../modules/local/create_hla_reference'
 include { BWA_MEM_CUSTOM } from '../modules/local/bwa_mem_custom'
+include { SomaticCombineChannel } from '../modules/local/SomaticCombineChannel'
+include { GENOMENEXUS_VCF2MAF } from '../modules/msk/genomenexus/vcf2maf/main'
 include { MULTIQC                } from '../modules/nf-core/multiqc/main'
 include { paramsSummaryMap       } from 'plugin/nf-schema'
 include { paramsSummaryMultiqc   } from '../subworkflows/nf-core/utils_nfcore_pipeline'
@@ -165,6 +167,7 @@ workflow HLASOMATIC {
 
     ch_versions = ch_versions.mix(BWA_MEM.out.versions.first())
 
+    BWA_MEM.out.bam.view()
     // Index realigned BAMs
     SAMTOOLS_INDEX (
         BWA_MEM.out.bam
@@ -177,7 +180,7 @@ workflow HLASOMATIC {
     ch_realigned_bams = BWA_MEM.out.bam
         .join(SAMTOOLS_INDEX.out.bai, by: [0])
     
-    // ch_realigned_bams.view()
+    ch_realigned_bams.view()
 
     // Get tumor realigned BAMs
     ch_tumor_realigned = ch_realigned_bams
@@ -202,8 +205,8 @@ workflow HLASOMATIC {
             [meta, tumor_bam, tumor_bai, normal_bam, normal_bai]
         }
 
-    // ch_tumor_normal_pairs.count().view { "Number of tumor-normal pairs: $it" }
-    // ch_tumor_normal_pairs.view { "Tumor-normal pairs: $it" }
+    ch_tumor_normal_pairs.count().view { "Number of tumor-normal pairs: $it" }
+    ch_tumor_normal_pairs.view { "Tumor-normal pairs: $it" }
 
     //
     // MODULE: Run Mutect2 for somatic mutation calling
@@ -242,24 +245,24 @@ workflow HLASOMATIC {
         ]
     }
 
-GATK4_FILTERMUTECTCALLS(
-    ch_filtermutect_in,
-    ch_reference.map { fasta -> [[id: 'reference'], fasta] },
-    ch_reference_fai.map { fai -> [[id: 'reference'], fai] },
-    GATK4_CREATESEQUENCEDICTIONARY.out.dict.map { meta, dict -> [[id: 'reference'], dict] }
-)
+    GATK4_FILTERMUTECTCALLS(
+        ch_filtermutect_in,
+        ch_reference.map { fasta -> [[id: 'reference'], fasta] },
+        ch_reference_fai.map { fai -> [[id: 'reference'], fai] },
+        GATK4_CREATESEQUENCEDICTIONARY.out.dict.map { meta, dict -> [[id: 'reference'], dict] }
+    )
     //
     // MODULE: Run Strelka for somatic mutation calling
     //
-
+    // CREATE_HLA_REFERENCE.out.hla_reference.view()
     // Prepare personalized reference for Strelka
     ch_hla_ref_with_patient_for_strelka = CREATE_HLA_REFERENCE.out.hla_reference.map { meta, fasta ->
-        def patient_id = meta.id.replace('_normal', '')
+        def patient_id = meta.id.replace('_normal', '_somatic')
         [patient_id, fasta]
     }
     
     ch_hla_fai_with_patient_for_strelka = SAMTOOLS_FAIDX.out.fai.map { meta, fai ->
-        def patient_id = meta.id.replace('_normal', '')
+        def patient_id = meta.id.replace('_normal', '_somatic')
         [patient_id, fai]
     }
     // ch_hla_ref_with_patient_for_strelka.view()
@@ -275,7 +278,7 @@ GATK4_FILTERMUTECTCALLS(
         .join(ch_hla_ref_with_patient_for_strelka)
         .join(ch_hla_fai_with_patient_for_strelka)
         .map { patient_id, meta, tumor_bam, tumor_bai, normal_bam, normal_bai, hla_fasta, hla_fai ->
-            [meta, tumor_bam, tumor_bai, normal_bam, normal_bai, hla_fasta, hla_fai]
+            [meta, normal_bam, normal_bai, tumor_bam, tumor_bai, hla_fasta, hla_fai]
         }
     
     // ch_strelka_input.view()
@@ -286,14 +289,24 @@ GATK4_FILTERMUTECTCALLS(
         ch_strelka_input.map { meta, normal_bam, normal_bai, tumor_bam, tumor_bai, hla_fasta, hla_fai -> [meta, hla_fai] }
     
     )
-
-    SomaticCombineMutect2Vcf.out.mutect2CombinedVcfOutput.combine(bamFiles, by: [0]).combine(SomaticRunStrelka2.out.strelka4Combine, by: [0,1,2]).set{ mutectStrelkaChannel }
-    SomaticCombineChannel(mutectStrelkaChannel,
-                          Channel.value([referenceMap.genomeFile, referenceMap.genomeIndex]),
-                          Channel.value([referenceMap.repeatMasker, referenceMap.repeatMaskerIndex, referenceMap.mapabilityBlacklist, referenceMap.mapabilityBlacklistIndex]),
-                          Channel.value([referenceMap.exomePoN, referenceMap.wgsPoN,referenceMap.exomePoNIndex, referenceMap.wgsPoNIndex,]),
-                          Channel.value([referenceMap.gnomadWesVcf, referenceMap.gnomadWesVcfIndex,referenceMap.gnomadWgsVcf, referenceMap.gnomadWgsVcfIndex]))
+    
     ch_versions = ch_versions.mix(STRELKA_SOMATIC.out.versions.first())
+
+
+    GATK4_FILTERMUTECTCALLS.out.forMutect2Combine
+    .combine(STRELKA_SOMATIC.out.strelka4Combine, by: [0])
+    .set{ mutectStrelkaChannel }
+
+    // mutectStrelkaChannel.view()
+    SomaticCombineChannel(
+        mutectStrelkaChannel,
+        ch_reference.map { fasta -> [[id: 'reference'], fasta] }
+    )
+
+
+    // GENOMENEXUS_VCF2MAF(SomaticCombineChannel.out.mutationMergedVcf)
+
+
 
     //
     // Collate and save software versions
@@ -351,9 +364,9 @@ GATK4_FILTERMUTECTCALLS(
     multiqc_report = MULTIQC.out.report.toList() // channel: /path/to/multiqc_report.html
     versions       = ch_versions                 // channel: [ path(versions.yml) ]
     hla_calls      = HLAHD.out.hla_calls        // channel: HLA typing results
-    // mutect2_vcf    = GATK4_MUTECT2.out.vcf      // channel: Mutect2 VCF files
-    // strelka_snvs   = STRELKA_SOMATIC.out.vcf_snvs    // channel: Strelka SNV VCF files
-    // strelka_indels = STRELKA_SOMATIC.out.vcf_indels  // channel: Strelka indel VCF files
+    mutect2_vcf    = GATK4_MUTECT2.out.vcf      // channel: Mutect2 VCF files
+    strelka_snvs   = STRELKA_SOMATIC.out.vcf_snvs    // channel: Strelka SNV VCF files
+    strelka_indels = STRELKA_SOMATIC.out.vcf_indels  // channel: Strelka indel VCF files
 
 }
 

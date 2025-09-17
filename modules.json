@@ -2,6 +2,19 @@
     "name": "nf-core/hlasomatic",
     "homePage": "https://github.com/nf-core/hlasomatic",
     "repos": {
+        "git@github.com:mskcc-omics-workflows/modules.git": {
+            "modules": {
+                "msk": {
+                    "genomenexus/vcf2maf": {
+                        "branch": "main",
+                        "git_sha": "4291d186fe611294748f60554ddd8ac2081853f0",
+                        "installed_by": [
+                            "modules"
+                        ]
+                    }
+                }
+            }
+        },
         "https://github.com/nf-core/modules.git": {
             "modules": {
                 "nf-core": {
@@ -76,6 +89,13 @@
                         ]
                     },
                     "strelka/somatic": {
+                        "branch": "master",
+                        "git_sha": "41dfa3f7c0ffabb96a6a813fe321c6d1cc5b6e46",
+                        "installed_by": [
+                            "modules"
+                        ]
+                    },
+                    "vcf2maf": {
                         "branch": "master",
                         "git_sha": "41dfa3f7c0ffabb96a6a813fe321c6d1cc5b6e46",
                         "installed_by": [

@@ -1,59 +1,54 @@
 process SomaticCombineChannel {
-  tag "${idTumor + "__" + idNormal}"
+  tag "CombineVCFS${meta.id}"
+  container = "cmopipeline/bcftools-vt:1.2.3"
 
   // 3 intermidiate files (plus 3 index files) output for step by step filter check (2 filter steps involved here)
   // publishDir "${params.outDir}/somatic/${idTumor}__${idNormal}/combined_mutations/intermediate_files/", mode: params.publishDirMode, pattern: "*.union.annot.*"
 
-  input:
-    tuple val(meta), path(mutectCombinedVcf), path(mutectCombinedVcfIndex), path(strelkaVcf), path(strelkaVcfIndex)
+  cpus = { 2 * task.attempt }
+  memory = 5.GB
 
+  input:
+    tuple val(meta), path(mutectCombinedVcf), path(mutectCombinedVcfIndex), path(strelkaVcfSNV), path(strelkaVcfSNVIndex),path(strelkaVcfIndel), path(strelkaVcfIndelIndex)
+    tuple val(meta2), path(fasta)
   output:
-    tuple val(idTumor), val(idNormal), val(target), path("${outputPrefix}.pass.vcf"), emit: mutationMergedVcf
-    path("${idTumor}__${idNormal}.union.annot.vcf.gz")
-    path("${idTumor}__${idNormal}.union.annot.vcf.gz.tbi")
-    path("${idTumor}__${idNormal}.union.annot.filter.vcf.gz")
-    path("${idTumor}__${idNormal}.union.annot.filter.vcf.gz.tbi")
-    path("${idTumor}__${idNormal}.union.annot.filter.pass.vcf.gz")
-    path("${idTumor}__${idNormal}.union.annot.filter.pass.vcf.gz.tbi")
+    tuple val(meta), path("*.union.vcf.gz"), emit: mutationMergedVcf
   
+  when:
+    task.ext.when == null || task.ext.when
+
   script:
-  outputPrefix = "${idTumor}__${idNormal}"
-  isecDir = "${idTumor}.isec"
-  pon = wgsPoN
-  gnomad = gnomadWgsVcf
-  if (target == "wgs") {
-    pon = wgsPoN
-    gnomad = gnomadWgsVcf
-  }
-  else {
-    pon = exomePoN
-    gnomad = gnomadWesVcf
-  }
+  def args = task.ext.args ?: ''
+  def prefix = task.ext.prefix ?: "${meta.id}"  
+
   """
 
-  echo -e 'TUMOR ${idTumor}\\nNORMAL ${idNormal}' > samples.txt
+  bcftools query -l ${mutectCombinedVcf} > samples.txt
+
   
   bcftools concat \
-    --allow-overlaps \
-    Strelka_${outputPrefix}_somatic_indels.vcf.gz Strelka_${outputPrefix}_somatic_snvs.vcf.gz | \
-  bcftools reheader \
-    --samples samples.txt | \
+      --allow-overlaps \
+      ${strelkaVcfSNV} ${strelkaVcfIndel} | \
   bcftools sort | \
   bcftools norm \
-    --fasta-ref ${genomeFile} \
-    --check-ref s \
-    --output-type z \
-    --output ${outfile}
+      --fasta-ref ${fasta} \
+      --check-ref s \
+      --output-type z \
+      --output ${prefix}_strelka2.vcf.gz
 
-  tabix --preset vcf ${outfile}
+  tabix --preset vcf ${prefix}_strelka2.vcf.gz
 
 
   merge_vcf.bash -n1 Mutect \\
   -n2 Strelka \\
   -f1 ${mutectCombinedVcf} \\
-  -f2 ${strelkaVcf} \\
-  -o outtmp
-  -p ${meta_id}
-  -r1 
+  -f2 ${prefix}_strelka2.vcf.gz \\
+  -o ./tmp/ \\
+  -p ${meta.id} \\
+  -r1 samples.txt \\
+  -r2 samples.txt 
+
+  cp ./tmp/*.union.vcf.gz .
+
   """
 }

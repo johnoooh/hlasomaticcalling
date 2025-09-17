@@ -14,7 +14,7 @@ process BWA_MEM {
     val   sort_bam
 
     output:
-    tuple val(meta), path("*.bam")  , emit: bam,    optional: true
+    tuple val(meta), path("*aligned.bam")  , emit: bam,    optional: true
     tuple val(meta), path("*.cram") , emit: cram,   optional: true
     tuple val(meta), path("*.csi")  , emit: csi,    optional: true
     tuple val(meta), path("*.crai") , emit: crai,   optional: true
@@ -40,11 +40,15 @@ process BWA_MEM {
     ls -l 
     echo \$INDEX
     bwa mem \\
-        $args \\
         -t $task.cpus \\
         \$INDEX \\
+        $args \\
         $reads \\
         | samtools $samtools_command $args2 ${reference} --threads $task.cpus -o ${prefix}.${extension} -
+    
+    samtools view -b -F 0x900 -f 0x2 -q 30 ${prefix}.${extension} -o aln.strict.filtered.bam
+    samtools sort -@8 -o ${prefix}_aligned.bam aln.strict.filtered.bam
+    ls -l
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":

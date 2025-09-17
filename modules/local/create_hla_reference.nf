@@ -35,8 +35,10 @@ with open("${hla_calls}") as f:
     for line in f:
         fields = line.strip().split("\t")
         gene = fields[0]
+        
         if gene in geneset:
             for allele in fields[1:]:
+                allele = allele.replace("*", "_").replace(":", "_")
                 if allele not in {"Not typed", "-"} and allele not in alleles:
                     alleles.append(allele)
 
