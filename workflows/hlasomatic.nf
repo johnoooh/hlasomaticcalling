@@ -167,7 +167,7 @@ workflow HLASOMATIC {
 
     ch_versions = ch_versions.mix(BWA_MEM.out.versions.first())
 
-    BWA_MEM.out.bam.view()
+    // BWA_MEM.out.bam.view()
     // Index realigned BAMs
     SAMTOOLS_INDEX (
         BWA_MEM.out.bam
@@ -180,7 +180,7 @@ workflow HLASOMATIC {
     ch_realigned_bams = BWA_MEM.out.bam
         .join(SAMTOOLS_INDEX.out.bai, by: [0])
     
-    ch_realigned_bams.view()
+    // ch_realigned_bams.view()
 
     // Get tumor realigned BAMs
     ch_tumor_realigned = ch_realigned_bams
