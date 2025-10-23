@@ -6,6 +6,8 @@
 include { HLAHD                  } from '../modules/local/hlahd'
 include { BWA_INDEX              } from '../modules/nf-core/bwa/index/main'
 include { BWA_MEM                } from '../modules/nf-core/bwa/mem/main'
+include { NOVOALIGN              } from '../modules/local/novoalign'
+include { NOVOINDEX              } from '../modules/local/novoindex'
 include { SAMTOOLS_INDEX         } from '../modules/nf-core/samtools/index/main'
 include { SAMTOOLS_FAIDX         } from '../modules/nf-core/samtools/faidx/main'
 include { SAMTOOLS_FASTQ         } from '../modules/nf-core/samtools/fastq/main'
@@ -15,6 +17,8 @@ include { STRELKA_SOMATIC        } from '../modules/nf-core/strelka/somatic/main
 include { GATK4_CREATESEQUENCEDICTIONARY } from '../modules/nf-core/gatk4/createsequencedictionary/main'
 include { CREATE_HLA_REFERENCE } from '../modules/local/create_hla_reference'
 include { BWA_MEM_CUSTOM } from '../modules/local/bwa_mem_custom'
+
+
 include { SomaticCombineChannel } from '../modules/local/SomaticCombineChannel'
 include { GENOMENEXUS_VCF2MAF } from '../modules/msk/genomenexus/vcf2maf/main'
 include { MULTIQC                } from '../modules/nf-core/multiqc/main'
@@ -43,7 +47,6 @@ workflow HLASOMATIC {
     //
     ch_reference = Channel.value(file(params.fasta, checkIfExists: true))
     ch_reference_fai = Channel.value(file(params.fastafai, checkIfExists: true))
-    ch_hlahd_db = Channel.value(file(params.hlahd_db, checkIfExists: true))
 
     //
     // Parse input samplesheet - now expects normal_bam, normal_bai, tumor_bam, tumor_bai
@@ -73,7 +76,7 @@ workflow HLASOMATIC {
     //
     SAMTOOLS_FASTQ (
         ch_all_bams.map { meta, bam, bai -> [meta, bam] },
-        false  // not interleaved
+        false
     )
     ch_versions = ch_versions.mix(SAMTOOLS_FASTQ.out.versions.first())
 
@@ -109,36 +112,35 @@ workflow HLASOMATIC {
         CREATE_HLA_REFERENCE.out.hla_reference.map { meta, fasta -> [meta, []] },     // Channel 2: Empty fai input with correct meta
         true                                                                           // Channel 3: get_sizes parameter
     )
-    // Create personalized HLA reference (this would need a custom process)
-    // For now, we'll use the original reference and proceed with realignment
-    
-    BWA_INDEX (
+    NOVOINDEX(
         CREATE_HLA_REFERENCE.out.hla_reference,
     )
 
-    ch_versions = ch_versions.mix(BWA_INDEX.out.versions.first())
+    // Create personalized HLA reference (this would need a custom process)
+    // For now, we'll use the original reference and proceed with realignment
+    
+    // BWA_INDEX (
+    //     CREATE_HLA_REFERENCE.out.hla_reference,
+    // )
+
+    // ch_versions = ch_versions.mix(BWA_INDEX.out.versions.first())
 
     // BWA_INDEX.out.index.view { "BWA_INDEX output: $it" }
     // SAMTOOLS_FASTQ.out.fastq.view { "SAMTOOLS_FASTQ output: $it" }
 
-    bwaindex    = BWA_INDEX.out.index
+    novo_index    = NOVOINDEX.out.index
 
     GATK4_CREATESEQUENCEDICTIONARY (
         ch_reference.map { fasta -> [[id: 'reference'], fasta] }
     )
 
-    ch_bwa_input = SAMTOOLS_FASTQ.out.fastq
-    .combine(BWA_INDEX.out.index)
-    .combine(CREATE_HLA_REFERENCE.out.hla_reference.map { fasta -> [[id: 'normal'], fasta] })
-
-    ch_bwa_index = BWA_INDEX.out.index
 
     ch_fastq_with_patient = SAMTOOLS_FASTQ.out.fastq.map { meta, fastq ->
         def patient_id = meta.id.replace('_normal', '').replace('_tumor', '')
         [patient_id, meta, fastq]
     }
 
-    ch_bwa_index_with_patient = BWA_INDEX.out.index.map { meta, index ->
+    ch_novo_index_with_patient = NOVOINDEX.out.index.map { meta, index ->
         def patient_id = meta.id.replace('_normal', '')
         [patient_id, index]
     }
@@ -150,7 +152,7 @@ workflow HLASOMATIC {
 
     // Join all channels by patient ID to create complete alignment input
     ch_alignment_input = ch_fastq_with_patient
-        .combine(ch_bwa_index_with_patient, by: 0)
+        .combine(ch_novo_index_with_patient, by: 0)
         .combine(ch_hla_ref_with_patient, by: 0)
         .map { patient_id, sample_meta, fastq, index, fasta ->
             [sample_meta, fastq, index, fasta]
@@ -158,26 +160,24 @@ workflow HLASOMATIC {
 
 
     // ch_alignment_input.view()
-    BWA_MEM (
+    NOVOALIGN (
         ch_alignment_input.map { sample_meta, fastq, index, fasta -> [sample_meta, fastq] },
-        ch_alignment_input.map { sample_meta, fastq, index, fasta -> [['id': 'bwa_index'], index] },
-        ch_alignment_input.map { sample_meta, fastq, index, fasta -> [['id': 'hla_reference'], fasta] },
-        true
+        ch_alignment_input.map { sample_meta, fastq, index, fasta -> [['id': 'novo_index'], index] }
     )
 
-    ch_versions = ch_versions.mix(BWA_MEM.out.versions.first())
+    // ch_versions = ch_versions.mix(BWA_MEM.out.versions.first())
 
     // BWA_MEM.out.bam.view()
     // Index realigned BAMs
     SAMTOOLS_INDEX (
-        BWA_MEM.out.bam
+        NOVOALIGN.out.bam
     )
     ch_versions = ch_versions.mix(SAMTOOLS_INDEX.out.versions.first())
 
     
     // Prepare tumor-normal pairs for somatic calling
     
-    ch_realigned_bams = BWA_MEM.out.bam
+    ch_realigned_bams = NOVOALIGN.out.bam
         .join(SAMTOOLS_INDEX.out.bai, by: [0])
     
     // ch_realigned_bams.view()
