@@ -429,13 +429,38 @@ workflow HLASOMATIC {
     )
     ch_versions = ch_versions.mix(COMBINE_ALLELE_VCFS.out.versions.first())
 
-    GATK4_FILTERMUTECTCALLS.out.forMutect2Combine
-    .combine(STRELKA_SOMATIC.out.strelka4Combine, by: [0])
-    .set{ mutectStrelkaChannel }
+    //
+    // Prepare combined VCFs for SomaticCombineChannel
+    // Join Mutect2, Strelka SNVs, and Strelka Indels by sample_id
+    //
+    ch_combined_mutect = COMBINE_ALLELE_VCFS.out.vcf
+        .filter { meta, vcf, tbi -> vcf.name.contains('mutect2') }
+        .map { meta, vcf, tbi -> [meta.sample_id, meta, vcf, tbi] }
 
-    // mutectStrelkaChannel.view()
+    ch_combined_strelka_snvs = COMBINE_ALLELE_VCFS.out.vcf
+        .filter { meta, vcf, tbi -> vcf.name.contains('strelka_snvs') }
+        .map { meta, vcf, tbi -> [meta.sample_id, meta, vcf, tbi] }
+
+    ch_combined_strelka_indels = COMBINE_ALLELE_VCFS.out.vcf
+        .filter { meta, vcf, tbi -> vcf.name.contains('strelka_indels') }
+        .map { meta, vcf, tbi -> [meta.sample_id, meta, vcf, tbi] }
+
+    // Join all three by sample_id
+    ch_for_somatic_combine = ch_combined_mutect
+        .join(ch_combined_strelka_snvs, by: 0)
+        .join(ch_combined_strelka_indels, by: 0)
+        .map { sample_id, mutect_meta, mutect_vcf, mutect_tbi,
+               strelka_snv_meta, strelka_snv_vcf, strelka_snv_tbi,
+               strelka_indel_meta, strelka_indel_vcf, strelka_indel_tbi ->
+            // Use mutect_meta as the base meta
+            [mutect_meta, mutect_vcf, mutect_tbi,
+             strelka_snv_vcf, strelka_snv_tbi,
+             strelka_indel_vcf, strelka_indel_tbi]
+        }
+
+    // ch_for_somatic_combine.view()
     SomaticCombineChannel(
-        mutectStrelkaChannel,
+        ch_for_somatic_combine,
         ch_reference.map { fasta -> [[id: 'reference'], fasta] }
     )
 
