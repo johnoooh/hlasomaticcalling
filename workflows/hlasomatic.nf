@@ -285,7 +285,7 @@ workflow HLASOMATIC {
         }
 
     ch_tumor_normal_pairs.count().view { "Number of tumor-normal-allele pairs: $it" }
-    ch_tumor_normal_pairs.view { "Tumor-normal-allele pairs: $it" }
+    // ch_tumor_normal_pairs.view { "Tumor-normal-allele pairs: $it" }
 
     //
     // MODULE: Run Mutect2 for somatic mutation calling
@@ -306,8 +306,7 @@ workflow HLASOMATIC {
 
     // Create the input channel for GATK4_FILTERMUTECTCALLS
     // This combines the VCF and stats outputs from MUTECT2
-    // Create the input channel for GATK4_FILTERMUTECTCALLS
-// This combines the VCF, TBI, and stats outputs from MUTECT2
+
     ch_filtermutect_in = GATK4_MUTECT2.out.vcf
     .join(GATK4_MUTECT2.out.tbi, by: 0)
     .join(GATK4_MUTECT2.out.stats, by: 0)

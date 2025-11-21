@@ -21,37 +21,32 @@ process EXTRACT_ALLELE_BAM {
     def args = task.ext.args ?: ''
     prefix = task.ext.prefix ?: "${meta.id}"
     // Remove HLA_ prefix and make safe for filenames
-    allele_safe = allele.replaceAll("HLA_", "").replaceAll("[^A-Za-z0-9_]", "_")
-    allele_ref = allele.replaceAll("HLA_", "")
+    
+    def allele_ref = allele.replace("HLA-", "")
+    allele_safe = allele_ref.replace('*', '_').replace(':', '_')
 
     meta_out = meta + [allele: allele, allele_safe: allele_safe]
 
     """
     # Extract reads mapping to this specific allele
     # First, check if the allele exists in the reference
-    if samtools view -H ${bam} | grep -q "${allele_ref}"; then
-        REF_NAME="${allele_ref}"
-    else
-        # If exact match not found, try to find partial matches
-        REF_NAME=\$(samtools view -H ${bam} | grep '^@SQ' | grep -i "${allele_ref}" | cut -f2 | cut -d':' -f2 | head -1)
-    fi
-
+    echo "Extracting reads for allele: ${allele_ref}"
+    REF_NAME=\$(samtools view -H ${bam} | grep '^@SQ' | grep -i "${allele_ref}" | cut -f2 | cut -d':' -f2 | head -1)
+    echo "Found reference name: \$REF_NAME"
     if [ -n "\$REF_NAME" ]; then
         echo "Extracting reads for reference: \$REF_NAME"
 
         # Extract reads for this allele with POLYSOLVER-style filtering:
         # 1. Extract reads mapping to this allele
-        # 2. Keep only properly paired reads (both mates mapped)
-        # 3. Keep only reads where BOTH mates map to the SAME allele (RNEXT="=")
-        # 4. Fix mate information
+        # 2. Keep only reads where BOTH mates map to the SAME allele (RNEXT="=")
+        # 3. Keep only properly paired reads (flag 0x2)
+        # Note: Skip fixmate since reads are already from aligned BAM with correct mate info
         samtools view -h ${bam} \$REF_NAME | \\
             awk 'BEGIN {OFS="\\t"}
                  /^@/ {print; next}  # Print header lines
-                 \$7 == "=" {print}  # Keep only reads where mate maps to same reference (RNEXT="=")
+                 \$7 == "=" && and(\$2, 0x2) {print}  # RNEXT="=" AND properly paired flag
             ' | \\
-            samtools view -b -h - | \\
-            samtools fixmate -m - - | \\
-            samtools view -b -f 0x2 - > ${prefix}.${allele_safe}.bam
+            samtools view -b -o ${prefix}.${allele_safe}.bam -
 
         # Report statistics
         TOTAL_READS=\$(samtools view -c ${bam} \$REF_NAME || echo "0")

@@ -53,7 +53,6 @@ process NOVOALIGN {
         ${args} \\
         ${alignment_mode} \\
         -o SAM | \\
-        grep -P '\\thla' | \\
         samtools view --threads ${task.cpus} ${samtools_args} - | \\
         samtools addreplacerg -r '@RG\\t${read_group}' -o ${prefix}.bam -
 
