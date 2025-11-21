@@ -67,9 +67,9 @@ process EXTRACT_ALLELE_BAM {
     # Index the BAM
     samtools index ${prefix}.${allele_safe}.bam
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        samtools: \$(echo \$(samtools --version 2>&1) | sed 's/^.*samtools //; s/Using.*\$//')
-    END_VERSIONS
+    cat <<END_VERSIONS > versions.yml
+"${task.process}":
+    samtools: \$(echo \$(samtools --version 2>&1) | sed 's/^.*samtools //; s/Using.*\$//')
+END_VERSIONS
     """
 }

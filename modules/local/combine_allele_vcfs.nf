@@ -82,9 +82,9 @@ process COMBINE_ALLELE_VCFS {
     echo "Variants per allele:" >> ${prefix}.stats.txt
     bcftools query -f '%INFO/HLA_ALLELE\\n' ${prefix}.combined.vcf.gz | sort | uniq -c >> ${prefix}.stats.txt
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        bcftools: \$(bcftools --version 2>&1 | head -n1 | sed 's/^.*bcftools //; s/ .*\$//')
-    END_VERSIONS
+    cat <<END_VERSIONS > versions.yml
+"${task.process}":
+    bcftools: \$(bcftools --version 2>&1 | head -n1 | sed 's/^.*bcftools //; s/ .*\$//')
+END_VERSIONS
     """
 }

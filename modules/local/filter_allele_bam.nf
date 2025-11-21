@@ -98,10 +98,10 @@ EOF
     # Index the filtered BAM
     samtools index ${prefix}.filtered.bam
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        samtools: \$(echo \$(samtools --version 2>&1) | sed 's/^.*samtools //; s/Using.*\$//')
-        awk: \$(awk --version 2>&1 | head -n1 | sed 's/GNU Awk //' | sed 's/,.*//')
-    END_VERSIONS
+    cat <<END_VERSIONS > versions.yml
+"${task.process}":
+    samtools: \$(echo \$(samtools --version 2>&1) | sed 's/^.*samtools //; s/Using.*\$//')
+    awk: \$(awk --version 2>&1 | head -n1 | sed 's/GNU Awk //' | sed 's/,.*//')
+END_VERSIONS
     """
 }
