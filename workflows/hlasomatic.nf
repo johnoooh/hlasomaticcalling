@@ -17,6 +17,8 @@ include { STRELKA_SOMATIC        } from '../modules/nf-core/strelka/somatic/main
 include { GATK4_CREATESEQUENCEDICTIONARY } from '../modules/nf-core/gatk4/createsequencedictionary/main'
 include { CREATE_HLA_REFERENCE } from '../modules/local/create_hla_reference'
 include { BWA_MEM_CUSTOM } from '../modules/local/bwa_mem_custom'
+include { PARSE_HLA_ALLELES } from '../modules/local/parse_hla_alleles'
+include { EXTRACT_ALLELE_BAM } from '../modules/local/extract_allele_bam'
 
 
 include { SomaticCombineChannel } from '../modules/local/SomaticCombineChannel'
@@ -174,9 +176,25 @@ workflow HLASOMATIC {
     )
     ch_versions = ch_versions.mix(SAMTOOLS_INDEX.out.versions.first())
 
-    
+    //
+    // MODULE: Parse HLA alleles for per-allele processing
+    //
+    PARSE_HLA_ALLELES (
+        ch_hla_calls
+    )
+    ch_versions = ch_versions.mix(PARSE_HLA_ALLELES.out.versions.first())
+
+    // Create a channel with individual alleles
+    ch_alleles_per_sample = PARSE_HLA_ALLELES.out.alleles_list
+        .flatMap { meta, alleles_file ->
+            def alleles = alleles_file.readLines()
+            alleles.collect { allele ->
+                [meta.id.replace('_normal', ''), meta, allele.trim()]
+            }
+        }
+
     // Prepare tumor-normal pairs for somatic calling
-    
+
     ch_realigned_bams = NOVOALIGN.out.bam
         .join(SAMTOOLS_INDEX.out.bai, by: [0])
     
@@ -192,21 +210,71 @@ workflow HLASOMATIC {
         .filter { meta, bam, bai -> meta.sample_type == 'normal' }
         .map { meta, bam, bai -> [meta.id.replace('_normal', ''), meta, bam, bai] }
 
-    // Join tumor and normal for each sample
-    ch_tumor_normal_pairs = ch_tumor_realigned
-        .join(ch_normal_realigned)
-        .map { sample_id, tumor_meta, tumor_bam, tumor_bai, normal_meta, normal_bam, normal_bai ->
+    // Prepare HLA reference for per-allele extraction
+    ch_hla_ref_keyed = CREATE_HLA_REFERENCE.out.hla_reference
+        .map { meta, fasta ->
+            def patient_id = meta.id.replace('_normal', '')
+            [patient_id, fasta]
+        }
+
+    // Combine tumor BAMs with alleles and HLA reference
+    ch_tumor_for_extraction = ch_tumor_realigned
+        .map { sample_id, meta, bam, bai -> [sample_id, meta, bam, bai] }
+        .combine(ch_alleles_per_sample.map { sample_id, meta, allele -> [sample_id, allele] }, by: 0)
+        .combine(ch_hla_ref_keyed, by: 0)
+        .map { sample_id, meta, bam, bai, allele, hla_ref ->
+            [meta, bam, bai, allele, hla_ref]
+        }
+
+    // Combine normal BAMs with alleles and HLA reference
+    ch_normal_for_extraction = ch_normal_realigned
+        .map { sample_id, meta, bam, bai -> [sample_id, meta, bam, bai] }
+        .combine(ch_alleles_per_sample.map { sample_id, meta, allele -> [sample_id, allele] }, by: 0)
+        .combine(ch_hla_ref_keyed, by: 0)
+        .map { sample_id, meta, bam, bai, allele, hla_ref ->
+            [meta, bam, bai, allele, hla_ref]
+        }
+
+    //
+    // MODULE: Extract per-allele BAMs
+    //
+    EXTRACT_ALLELE_BAM (
+        ch_tumor_for_extraction.mix(ch_normal_for_extraction)
+    )
+    ch_versions = ch_versions.mix(EXTRACT_ALLELE_BAM.out.versions.first())
+
+    // Separate tumor and normal per-allele BAMs
+    ch_tumor_allele_bams = EXTRACT_ALLELE_BAM.out.bam
+        .filter { meta, bam, bai -> meta.sample_type == 'tumor' }
+        .map { meta, bam, bai ->
+            def sample_id = meta.id.replace('_tumor', '')
+            [sample_id, meta.allele, meta, bam, bai]
+        }
+
+    ch_normal_allele_bams = EXTRACT_ALLELE_BAM.out.bam
+        .filter { meta, bam, bai -> meta.sample_type == 'normal' }
+        .map { meta, bam, bai ->
+            def sample_id = meta.id.replace('_normal', '')
+            [sample_id, meta.allele, meta, bam, bai]
+        }
+
+    // Join tumor and normal for each sample and allele
+    ch_tumor_normal_pairs = ch_tumor_allele_bams
+        .join(ch_normal_allele_bams, by: [0, 1])
+        .map { sample_id, allele, tumor_meta, tumor_bam, tumor_bai, normal_meta, normal_bam, normal_bai ->
             def meta = [
-                id: "${sample_id}_somatic",
+                id: "${sample_id}_${tumor_meta.allele_safe}_somatic",
                 sample_id: sample_id,
+                allele: allele,
+                allele_safe: tumor_meta.allele_safe,
                 tumor_id: tumor_meta.id,
                 normal_id: normal_meta.id
             ]
             [meta, tumor_bam, tumor_bai, normal_bam, normal_bai]
         }
 
-    ch_tumor_normal_pairs.count().view { "Number of tumor-normal pairs: $it" }
-    ch_tumor_normal_pairs.view { "Tumor-normal pairs: $it" }
+    ch_tumor_normal_pairs.count().view { "Number of tumor-normal-allele pairs: $it" }
+    ch_tumor_normal_pairs.view { "Tumor-normal-allele pairs: $it" }
 
     //
     // MODULE: Run Mutect2 for somatic mutation calling
@@ -255,28 +323,29 @@ workflow HLASOMATIC {
     // MODULE: Run Strelka for somatic mutation calling
     //
     // CREATE_HLA_REFERENCE.out.hla_reference.view()
-    // Prepare personalized reference for Strelka
-    ch_hla_ref_with_patient_for_strelka = CREATE_HLA_REFERENCE.out.hla_reference.map { meta, fasta ->
-        def patient_id = meta.id.replace('_normal', '_somatic')
-        [patient_id, fasta]
-    }
-    
-    ch_hla_fai_with_patient_for_strelka = SAMTOOLS_FAIDX.out.fai.map { meta, fai ->
-        def patient_id = meta.id.replace('_normal', '_somatic')
-        [patient_id, fai]
-    }
-    // ch_hla_ref_with_patient_for_strelka.view()
-    // ch_hla_fai_with_patient_for_strelka.view()
+    // Prepare personalized reference for Strelka (per-allele)
+    // The HLA reference contains all alleles, but BAMs are already filtered per-allele
+    ch_hla_ref_for_strelka = CREATE_HLA_REFERENCE.out.hla_reference
+        .map { meta, fasta ->
+            def patient_id = meta.id.replace('_normal', '')
+            [patient_id, fasta]
+        }
 
+    ch_hla_fai_for_strelka = SAMTOOLS_FAIDX.out.fai
+        .map { meta, fai ->
+            def patient_id = meta.id.replace('_normal', '')
+            [patient_id, fai]
+        }
 
+    // Key tumor-normal pairs by sample_id for joining with references
     ch_tumor_normal_keyed = ch_tumor_normal_pairs.map { meta, tumor_bam, tumor_bai, normal_bam, normal_bai ->
-        [meta.id, meta, tumor_bam, tumor_bai, normal_bam, normal_bai]
+        [meta.sample_id, meta, tumor_bam, tumor_bai, normal_bam, normal_bai]
     }
 
     // Join everything together
     ch_strelka_input = ch_tumor_normal_keyed
-        .join(ch_hla_ref_with_patient_for_strelka)
-        .join(ch_hla_fai_with_patient_for_strelka)
+        .combine(ch_hla_ref_for_strelka, by: 0)
+        .combine(ch_hla_fai_for_strelka, by: 0)
         .map { patient_id, meta, tumor_bam, tumor_bai, normal_bam, normal_bai, hla_fasta, hla_fai ->
             [meta, normal_bam, normal_bai, tumor_bam, tumor_bai, hla_fasta, hla_fai]
         }
@@ -364,9 +433,11 @@ workflow HLASOMATIC {
     multiqc_report = MULTIQC.out.report.toList() // channel: /path/to/multiqc_report.html
     versions       = ch_versions                 // channel: [ path(versions.yml) ]
     hla_calls      = HLAHD.out.hla_calls        // channel: HLA typing results
-    mutect2_vcf    = GATK4_MUTECT2.out.vcf      // channel: Mutect2 VCF files
-    strelka_snvs   = STRELKA_SOMATIC.out.vcf_snvs    // channel: Strelka SNV VCF files
-    strelka_indels = STRELKA_SOMATIC.out.vcf_indels  // channel: Strelka indel VCF files
+    alleles_list   = PARSE_HLA_ALLELES.out.alleles_list // channel: Per-sample allele list
+    mutect2_vcf    = GATK4_MUTECT2.out.vcf      // channel: Per-allele Mutect2 VCF files
+    strelka_snvs   = STRELKA_SOMATIC.out.vcf_snvs    // channel: Per-allele Strelka SNV VCF files
+    strelka_indels = STRELKA_SOMATIC.out.vcf_indels  // channel: Per-allele Strelka indel VCF files
+    allele_bams    = EXTRACT_ALLELE_BAM.out.bam     // channel: Per-allele BAM files
 
 }
 
