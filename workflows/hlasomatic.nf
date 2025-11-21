@@ -433,17 +433,25 @@ workflow HLASOMATIC {
     // Prepare combined VCFs for SomaticCombineChannel
     // Join Mutect2, Strelka SNVs, and Strelka Indels by sample_id
     //
+    COMBINE_ALLELE_VCFS.out.vcf.view { "COMBINE_ALLELE_VCFS output: $it" }
+
     ch_combined_mutect = COMBINE_ALLELE_VCFS.out.vcf
         .filter { meta, vcf, tbi -> vcf.name.contains('mutect2') }
         .map { meta, vcf, tbi -> [meta.sample_id, meta, vcf, tbi] }
+
+    ch_combined_mutect.view { "ch_combined_mutect: $it" }
 
     ch_combined_strelka_snvs = COMBINE_ALLELE_VCFS.out.vcf
         .filter { meta, vcf, tbi -> vcf.name.contains('strelka_snvs') }
         .map { meta, vcf, tbi -> [meta.sample_id, meta, vcf, tbi] }
 
+    ch_combined_strelka_snvs.view { "ch_combined_strelka_snvs: $it" }
+
     ch_combined_strelka_indels = COMBINE_ALLELE_VCFS.out.vcf
         .filter { meta, vcf, tbi -> vcf.name.contains('strelka_indels') }
         .map { meta, vcf, tbi -> [meta.sample_id, meta, vcf, tbi] }
+
+    ch_combined_strelka_indels.view { "ch_combined_strelka_indels: $it" }
 
     // Join all three by sample_id
     ch_for_somatic_combine = ch_combined_mutect
@@ -458,7 +466,9 @@ workflow HLASOMATIC {
              strelka_indel_vcf, strelka_indel_tbi]
         }
 
-    // ch_for_somatic_combine.view()
+    ch_for_somatic_combine.view { "ch_for_somatic_combine (final): $it" }
+    ch_for_somatic_combine.count().view { "Number of items for SomaticCombineChannel: $it" }
+
     SomaticCombineChannel(
         ch_for_somatic_combine,
         ch_reference.map { fasta -> [[id: 'reference'], fasta] }
