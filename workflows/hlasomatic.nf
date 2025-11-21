@@ -445,6 +445,7 @@ workflow HLASOMATIC {
         .filter { meta, vcf, tbi -> vcf.name.contains('strelka_indels') }
         .map { meta, vcf, tbi -> [meta.sample_id, meta, vcf, tbi] }
 
+    
     // Join all three by sample_id
     ch_for_somatic_combine = ch_combined_mutect
         .join(ch_combined_strelka_snvs, by: 0)
@@ -458,7 +459,7 @@ workflow HLASOMATIC {
              strelka_indel_vcf, strelka_indel_tbi]
         }
 
-    // ch_for_somatic_combine.view()
+    ch_for_somatic_combine.view()
     SomaticCombineChannel(
         ch_for_somatic_combine,
         ch_reference.map { fasta -> [[id: 'reference'], fasta] }
