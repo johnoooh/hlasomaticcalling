@@ -39,15 +39,17 @@ process COMBINE_ALLELE_VCFS {
         allele=\$(echo "\$base" | sed -E 's/.*_([A-Z]_[0-9_]+)_.*/\\1/')
 
         if [ -n "\$allele" ] && [ "\$allele" != "\$base" ]; then
-            # Simpler approach: Add HLA_ALLELE using bcftools +fill-tags
-            # First, add the header line
-            echo '##INFO=<ID=HLA_ALLELE,Number=1,Type=String,Description="HLA allele from which this variant was called">' > header.txt
-
-            # Add header and then use awk to add the INFO field directly
-            bcftools view -h "\$vcf_file" | cat - header.txt > new_header.txt
-            bcftools reheader -h new_header.txt "\$vcf_file" | \\
-                bcftools view -H | \\
-                awk -v allele="\$allele" 'BEGIN{OFS="\\t"} {
+            # Add HLA_ALLELE to INFO field
+            # Step 1: Create new header with HLA_ALLELE definition
+            {
+                # Output original header lines except the last line (#CHROM)
+                bcftools view -h "\$vcf_file" | grep -v '^#CHROM'
+                # Add our INFO line
+                echo '##INFO=<ID=HLA_ALLELE,Number=1,Type=String,Description="HLA allele from which this variant was called">'
+                # Add the #CHROM line
+                bcftools view -h "\$vcf_file" | grep '^#CHROM'
+                # Add data with modified INFO field
+                bcftools view -H "\$vcf_file" | awk -v allele="\$allele" 'BEGIN{OFS="\\t"} {
                     # Add HLA_ALLELE to INFO field (field 8)
                     if (\$8 == "." || \$8 == "") {
                         \$8 = "HLA_ALLELE=" allele
@@ -55,15 +57,13 @@ process COMBINE_ALLELE_VCFS {
                         \$8 = \$8 ";HLA_ALLELE=" allele
                     }
                     print
-                }' | \\
-                cat <(bcftools view -h "\$vcf_file" | cat - header.txt) - | \\
-                bcftools view -O z -o annotated_vcfs/\$(basename "\$vcf_file")
+                }'
+            } | bgzip -c > annotated_vcfs/\$(basename "\$vcf_file")
 
             # Index the annotated VCF
-            bcftools index -t annotated_vcfs/\$(basename "\$vcf_file")
+            tabix -p vcf annotated_vcfs/\$(basename "\$vcf_file")
 
             echo "Annotated \$vcf_file with allele: \$allele"
-            rm -f header.txt new_header.txt
         else
             # If allele extraction fails, copy original
             echo "Warning: Could not extract allele from \$vcf_file, using original"
