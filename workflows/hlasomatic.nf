@@ -285,7 +285,7 @@ workflow HLASOMATIC {
         }
 
     ch_tumor_normal_pairs.count().view { "Number of tumor-normal-allele pairs: $it" }
-    ch_tumor_normal_pairs.view { "Tumor-normal-allele pairs: $it" }
+    // ch_tumor_normal_pairs.view { "Tumor-normal-allele pairs: $it" }
 
     //
     // MODULE: Run Mutect2 for somatic mutation calling
