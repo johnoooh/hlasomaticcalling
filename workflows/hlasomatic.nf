@@ -19,6 +19,7 @@ include { CREATE_HLA_REFERENCE } from '../modules/local/create_hla_reference'
 include { BWA_MEM_CUSTOM } from '../modules/local/bwa_mem_custom'
 include { PARSE_HLA_ALLELES } from '../modules/local/parse_hla_alleles'
 include { EXTRACT_ALLELE_BAM } from '../modules/local/extract_allele_bam'
+include { COMBINE_ALLELE_VCFS } from '../modules/local/combine_allele_vcfs'
 
 
 include { SomaticCombineChannel } from '../modules/local/SomaticCombineChannel'
@@ -319,6 +320,22 @@ workflow HLASOMATIC {
         ch_reference_fai.map { fai -> [[id: 'reference'], fai] },
         GATK4_CREATESEQUENCEDICTIONARY.out.dict.map { meta, dict -> [[id: 'reference'], dict] }
     )
+
+    //
+    // Combine per-allele VCFs into per-sample VCFs (Mutect2)
+    //
+    ch_mutect_per_sample = GATK4_FILTERMUTECTCALLS.out.vcf
+        .join(GATK4_FILTERMUTECTCALLS.out.tbi, by: 0)
+        .map { meta, vcf, tbi ->
+            def sample_id = meta.sample_id
+            [sample_id, 'mutect2', meta, vcf, tbi]
+        }
+        .groupTuple(by: [0, 1])
+        .map { sample_id, caller, metas, vcfs, tbis ->
+            def meta = [sample_id: sample_id, id: sample_id]
+            [meta, caller, vcfs, tbis]
+        }
+
     //
     // MODULE: Run Strelka for somatic mutation calling
     //
@@ -356,11 +373,51 @@ workflow HLASOMATIC {
         ch_strelka_input.map { meta, normal_bam, normal_bai, tumor_bam, tumor_bai, hla_fasta, hla_fai -> [meta, normal_bam, normal_bai, tumor_bam, tumor_bai, [], [], [], []] },
         ch_strelka_input.map { meta, normal_bam, normal_bai, tumor_bam, tumor_bai, hla_fasta, hla_fai -> [meta, hla_fasta] },
         ch_strelka_input.map { meta, normal_bam, normal_bai, tumor_bam, tumor_bai, hla_fasta, hla_fai -> [meta, hla_fai] }
-    
+
     )
-    
+
     ch_versions = ch_versions.mix(STRELKA_SOMATIC.out.versions.first())
 
+    //
+    // Combine per-allele VCFs into per-sample VCFs (Strelka SNVs)
+    //
+    ch_strelka_snvs_per_sample = STRELKA_SOMATIC.out.vcf_snvs
+        .join(STRELKA_SOMATIC.out.vcf_snvs_tbi, by: 0)
+        .map { meta, vcf, tbi ->
+            def sample_id = meta.sample_id
+            [sample_id, 'strelka_snvs', meta, vcf, tbi]
+        }
+        .groupTuple(by: [0, 1])
+        .map { sample_id, caller, metas, vcfs, tbis ->
+            def meta = [sample_id: sample_id, id: sample_id]
+            [meta, caller, vcfs, tbis]
+        }
+
+    //
+    // Combine per-allele VCFs into per-sample VCFs (Strelka Indels)
+    //
+    ch_strelka_indels_per_sample = STRELKA_SOMATIC.out.vcf_indels
+        .join(STRELKA_SOMATIC.out.vcf_indels_tbi, by: 0)
+        .map { meta, vcf, tbi ->
+            def sample_id = meta.sample_id
+            [sample_id, 'strelka_indels', meta, vcf, tbi]
+        }
+        .groupTuple(by: [0, 1])
+        .map { sample_id, caller, metas, vcfs, tbis ->
+            def meta = [sample_id: sample_id, id: sample_id]
+            [meta, caller, vcfs, tbis]
+        }
+
+    //
+    // MODULE: Combine per-allele VCFs into per-sample VCFs
+    //
+    COMBINE_ALLELE_VCFS (
+        ch_mutect_per_sample.mix(
+            ch_strelka_snvs_per_sample,
+            ch_strelka_indels_per_sample
+        )
+    )
+    ch_versions = ch_versions.mix(COMBINE_ALLELE_VCFS.out.versions.first())
 
     GATK4_FILTERMUTECTCALLS.out.forMutect2Combine
     .combine(STRELKA_SOMATIC.out.strelka4Combine, by: [0])
@@ -438,6 +495,7 @@ workflow HLASOMATIC {
     strelka_snvs   = STRELKA_SOMATIC.out.vcf_snvs    // channel: Per-allele Strelka SNV VCF files
     strelka_indels = STRELKA_SOMATIC.out.vcf_indels  // channel: Per-allele Strelka indel VCF files
     allele_bams    = EXTRACT_ALLELE_BAM.out.bam     // channel: Per-allele BAM files
+    combined_vcfs  = COMBINE_ALLELE_VCFS.out.vcf    // channel: Per-sample combined VCF files
 
 }
 
