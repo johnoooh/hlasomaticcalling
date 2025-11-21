@@ -345,6 +345,8 @@ workflow HLASOMATIC {
             [meta, caller, vcfs, tbis]
         }
 
+    ch_mutect_per_sample.view { "ch_mutect_per_sample input to COMBINE_ALLELE_VCFS: $it" }
+
     //
     // MODULE: Run Strelka for somatic mutation calling
     //
@@ -416,6 +418,8 @@ workflow HLASOMATIC {
             def meta = [sample_id: sample_id, id: sample_id]
             [meta, caller, vcfs, tbis]
         }
+
+    ch_strelka_indels_per_sample.view { "ch_strelka_indels_per_sample input to COMBINE_ALLELE_VCFS: $it" }
 
     //
     // MODULE: Combine per-allele VCFs into per-sample VCFs
