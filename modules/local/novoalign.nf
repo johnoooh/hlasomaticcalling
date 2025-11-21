@@ -22,17 +22,19 @@ process NOVOALIGN {
 
     script:
     def args = task.ext.args ?: ''
-    def args2 = task.ext.args2 ?: ''
     def samtools_args = task.ext.samtools_args ?: '-b -h'
     def prefix = task.ext.prefix ?: "${meta.id}"
     def forward_reads = reads[0]
     def reverse_reads = reads[1]
-    
+
     // Polysolver uses -o FullNW by default (no soft clipping)
     // Set soft_clip parameter via task.ext.soft_clip if you want soft clipping mode
     def soft_clip = task.ext.soft_clip ?: false
     def alignment_mode = soft_clip ? '-g 20 -x 3' : '-o FullNW'
-    
+
+    // Prepare read group string for samtools addreplacerg
+    def read_group = "ID:${meta.id}\\tSM:${meta.id}\\tPL:ILLUMINA\\tLB:${meta.id}\\tPU:${meta.id}"
+
     """
     # Uncompress the input files
     gunzip -c ${forward_reads} > forward_reads.fastq
@@ -44,17 +46,16 @@ process NOVOALIGN {
     # -o SAM: SAM output format
     # -o FullNW OR -g 20 -x 3: Alignment mode (no soft-clip vs soft-clip)
     # grep -P '\\thla': Keep only HLA-aligned reads
+    # samtools addreplacerg: Add read group to BAM
     novoalign -d ${index} \\
         -f forward_reads.fastq reverse_reads.fastq \\
         -F STDFQ \\
-        -R 0 \\
-        -r all \\
-        -o SAM \\
-        ${alignment_mode} \\
         ${args} \\
-        ${args2} | \\
+        ${alignment_mode} \\
+        -o SAM | \\
         grep -P '\\thla' | \\
-        samtools view --threads ${task.cpus} ${samtools_args} -o ${prefix}.bam -
+        samtools view --threads ${task.cpus} ${samtools_args} - | \\
+        samtools addreplacerg -r '@RG\\t${read_group}' -o ${prefix}.bam -
 
     # Sort the BAM file
     samtools sort --threads ${task.cpus} -o ${prefix}.sorted.bam ${prefix}.bam
