@@ -20,6 +20,7 @@ include { BWA_MEM_CUSTOM } from '../modules/local/bwa_mem_custom'
 include { PARSE_HLA_ALLELES } from '../modules/local/parse_hla_alleles'
 include { EXTRACT_ALLELE_BAM } from '../modules/local/extract_allele_bam'
 include { COMBINE_ALLELE_VCFS } from '../modules/local/combine_allele_vcfs'
+include { EXTRACT_HLA_REGION } from '../modules/local/extract_hla_region'
 
 
 include { SomaticCombineChannel } from '../modules/local/SomaticCombineChannel'
@@ -75,10 +76,19 @@ workflow HLASOMATIC {
     // ch_all_bams.view()
 
     //
-    // Convert BAMs to FASTQ for processing
+    // MODULE: Extract HLA region from BAMs (POLYSOLVER approach)
+    // This reduces data volume by extracting only HLA-relevant reads before FASTQ conversion
+    //
+    EXTRACT_HLA_REGION (
+        ch_all_bams
+    )
+    ch_versions = ch_versions.mix(EXTRACT_HLA_REGION.out.versions.first())
+
+    //
+    // Convert HLA region BAMs to FASTQ for processing
     //
     SAMTOOLS_FASTQ (
-        ch_all_bams.map { meta, bam, bai -> [meta, bam] },
+        EXTRACT_HLA_REGION.out.bam.map { meta, bam, bai -> [meta, bam] },
         false
     )
     ch_versions = ch_versions.mix(SAMTOOLS_FASTQ.out.versions.first())
@@ -489,6 +499,7 @@ workflow HLASOMATIC {
     emit:
     multiqc_report = MULTIQC.out.report.toList() // channel: /path/to/multiqc_report.html
     versions       = ch_versions                 // channel: [ path(versions.yml) ]
+    hla_region_stats = EXTRACT_HLA_REGION.out.stats // channel: HLA region extraction statistics
     hla_calls      = HLAHD.out.hla_calls        // channel: HLA typing results
     alleles_list   = PARSE_HLA_ALLELES.out.alleles_list // channel: Per-sample allele list
     mutect2_vcf    = GATK4_MUTECT2.out.vcf      // channel: Per-allele Mutect2 VCF files
