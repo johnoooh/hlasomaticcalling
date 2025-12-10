@@ -331,16 +331,35 @@ workflow HLASOMATIC {
     )
 
     //
+    // Create a channel with allele counts per sample for incremental grouping
+    //
+    ch_allele_counts = PARSE_HLA_ALLELES.out.alleles_list
+        .map { meta, alleles_file ->
+            def sample_id = meta.id.replace('_normal', '')
+            def alleles = alleles_file.readLines()
+            [sample_id, alleles.size()]
+        }
+
+    //
     // Combine per-allele VCFs into per-sample VCFs (Mutect2)
     //
     ch_mutect_per_sample = GATK4_FILTERMUTECTCALLS.out.vcf
         .join(GATK4_FILTERMUTECTCALLS.out.tbi, by: 0)
         .map { meta, vcf, tbi ->
             def sample_id = meta.sample_id
-            [sample_id, 'mutect2', meta, vcf, tbi]
+            [sample_id, meta, vcf, tbi]
         }
-        .groupTuple(by: [0, 1])
-        .map { sample_id, caller, metas, vcfs, tbis ->
+        .combine(ch_allele_counts, by: 0)
+        .map { sample_id, meta, vcf, tbi, count ->
+            // Include count in grouping key for independent completion
+            [sample_id, 'mutect2', count, meta, vcf, tbi]
+        }
+        .groupTuple(by: [0, 1, 2])  // Group by sample_id, caller, AND expected count
+        .filter { sample_id, caller, count, metas, vcfs, tbis ->
+            // Only emit when we have all alleles for this sample
+            vcfs.size() == count
+        }
+        .map { sample_id, caller, count, metas, vcfs, tbis ->
             def meta = [sample_id: sample_id, id: sample_id]
             [meta, caller, vcfs, tbis]
         }
@@ -394,10 +413,17 @@ workflow HLASOMATIC {
         .join(STRELKA_SOMATIC.out.vcf_snvs_tbi, by: 0)
         .map { meta, vcf, tbi ->
             def sample_id = meta.sample_id
-            [sample_id, 'strelka_snvs', meta, vcf, tbi]
+            [sample_id, meta, vcf, tbi]
         }
-        .groupTuple(by: [0, 1])
-        .map { sample_id, caller, metas, vcfs, tbis ->
+        .combine(ch_allele_counts, by: 0)
+        .map { sample_id, meta, vcf, tbi, count ->
+            [sample_id, 'strelka_snvs', count, meta, vcf, tbi]
+        }
+        .groupTuple(by: [0, 1, 2])
+        .filter { sample_id, caller, count, metas, vcfs, tbis ->
+            vcfs.size() == count
+        }
+        .map { sample_id, caller, count, metas, vcfs, tbis ->
             def meta = [sample_id: sample_id, id: sample_id]
             [meta, caller, vcfs, tbis]
         }
@@ -409,10 +435,17 @@ workflow HLASOMATIC {
         .join(STRELKA_SOMATIC.out.vcf_indels_tbi, by: 0)
         .map { meta, vcf, tbi ->
             def sample_id = meta.sample_id
-            [sample_id, 'strelka_indels', meta, vcf, tbi]
+            [sample_id, meta, vcf, tbi]
         }
-        .groupTuple(by: [0, 1])
-        .map { sample_id, caller, metas, vcfs, tbis ->
+        .combine(ch_allele_counts, by: 0)
+        .map { sample_id, meta, vcf, tbi, count ->
+            [sample_id, 'strelka_indels', count, meta, vcf, tbi]
+        }
+        .groupTuple(by: [0, 1, 2])
+        .filter { sample_id, caller, count, metas, vcfs, tbis ->
+            vcfs.size() == count
+        }
+        .map { sample_id, caller, count, metas, vcfs, tbis ->
             def meta = [sample_id: sample_id, id: sample_id]
             [meta, caller, vcfs, tbis]
         }
