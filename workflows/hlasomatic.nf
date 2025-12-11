@@ -340,24 +340,39 @@ workflow HLASOMATIC {
             [sample_id, alleles.size()]
         }
 
+    ch_allele_counts.view { "DEBUG ch_allele_counts: $it" }
+
     //
     // Combine per-allele VCFs into per-sample VCFs (Mutect2)
     //
-    ch_mutect_per_sample = GATK4_FILTERMUTECTCALLS.out.vcf
+    ch_mutect_before_combine = GATK4_FILTERMUTECTCALLS.out.vcf
         .join(GATK4_FILTERMUTECTCALLS.out.tbi, by: 0)
         .map { meta, vcf, tbi ->
             def sample_id = meta.sample_id
             [sample_id, meta, vcf, tbi]
         }
+
+    ch_mutect_before_combine.view { "DEBUG ch_mutect_before_combine: sample_id=${it[0]}" }
+
+    ch_mutect_per_sample = ch_mutect_before_combine
         .combine(ch_allele_counts, by: 0)
         .map { sample_id, meta, vcf, tbi, count ->
             // Include count in grouping key for independent completion
             [sample_id, 'mutect2', count, meta, vcf, tbi]
         }
         .groupTuple(by: [0, 1, 2])  // Group by sample_id, caller, AND expected count
+        .map { sample_id, caller, count, metas, vcfs, tbis ->
+            // Debug: show what we got
+            println "DEBUG grouped mutect: sample=${sample_id}, count=${count}, vcfs.size=${vcfs.size()}"
+            [sample_id, caller, count, metas, vcfs, tbis]
+        }
         .filter { sample_id, caller, count, metas, vcfs, tbis ->
             // Only emit when we have all alleles for this sample
-            vcfs.size() == count
+            def pass = (vcfs.size() == count)
+            if (!pass) {
+                println "DEBUG filter blocked: sample=${sample_id}, expected=${count}, got=${vcfs.size()}"
+            }
+            return pass
         }
         .map { sample_id, caller, count, metas, vcfs, tbis ->
             def meta = [sample_id: sample_id, id: sample_id]
