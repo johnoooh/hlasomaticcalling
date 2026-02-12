@@ -21,6 +21,7 @@ include { PARSE_HLA_ALLELES } from '../modules/local/parse_hla_alleles'
 include { EXTRACT_ALLELE_BAM } from '../modules/local/extract_allele_bam'
 include { COMBINE_ALLELE_VCFS } from '../modules/local/combine_allele_vcfs'
 include { EXTRACT_HLA_REGION } from '../modules/local/extract_hla_region'
+include { FILTER_ALLELE_BAM } from '../modules/local/filter_allele_bam'
 
 
 include { SomaticCombineChannel } from '../modules/local/SomaticCombineChannel'
@@ -51,6 +52,10 @@ workflow HLASOMATIC {
     //
     ch_reference = Channel.value(file(params.fasta, checkIfExists: true))
     ch_reference_fai = Channel.value(file(params.fastafai, checkIfExists: true))
+
+    // Genome reference for extracting non-classical HLA decoy sequences
+    ch_genome_fasta = Channel.value(file(params.genome_fasta, checkIfExists: true))
+    ch_genome_fasta_fai = Channel.value(file(params.genome_fasta_fai, checkIfExists: true))
 
     //
     // Parse input samplesheet - now expects normal_bam, normal_bai, tumor_bam, tumor_bai
@@ -114,9 +119,11 @@ workflow HLASOMATIC {
     ch_hla_calls = HLAHD.out.hla_calls
     // ch_hla_calls.view()
 
-    CREATE_HLA_REFERENCE ( 
-        ch_hla_calls, 
-        ch_reference
+    CREATE_HLA_REFERENCE (
+        ch_hla_calls,
+        ch_reference,
+        ch_genome_fasta,
+        ch_genome_fasta_fai
     )
     // CREATE_HLA_REFERENCE.out.hla_reference.view()
 
@@ -254,15 +261,24 @@ workflow HLASOMATIC {
     )
     ch_versions = ch_versions.mix(EXTRACT_ALLELE_BAM.out.versions.first())
 
-    // Separate tumor and normal per-allele BAMs
-    ch_tumor_allele_bams = EXTRACT_ALLELE_BAM.out.bam
+    //
+    // MODULE: Filter per-allele BAMs (Polysolver-style NM + indel event filter)
+    // Removes reads with excessive mismatches/indels (likely paralog contaminants)
+    //
+    FILTER_ALLELE_BAM (
+        EXTRACT_ALLELE_BAM.out.bam
+    )
+    ch_versions = ch_versions.mix(FILTER_ALLELE_BAM.out.versions.first())
+
+    // Separate tumor and normal per-allele BAMs (using filtered BAMs)
+    ch_tumor_allele_bams = FILTER_ALLELE_BAM.out.bam
         .filter { meta, bam, bai -> meta.sample_type == 'tumor' }
         .map { meta, bam, bai ->
             def sample_id = meta.id.replace('_tumor', '')
             [sample_id, meta.allele, meta, bam, bai]
         }
 
-    ch_normal_allele_bams = EXTRACT_ALLELE_BAM.out.bam
+    ch_normal_allele_bams = FILTER_ALLELE_BAM.out.bam
         .filter { meta, bam, bai -> meta.sample_type == 'normal' }
         .map { meta, bam, bai ->
             def sample_id = meta.id.replace('_normal', '')

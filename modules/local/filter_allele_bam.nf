@@ -21,7 +21,7 @@ process FILTER_ALLELE_BAM {
     script:
     def args = task.ext.args ?: ''
     def max_events = task.ext.max_events ?: 10  // Default: max 10 mismatches+indels
-    prefix = task.ext.prefix ?: "${meta.id}"
+    prefix = task.ext.prefix ?: "${meta.id}.${meta.allele_safe}"
 
     """
     # POLYSOLVER-style event count filtering
