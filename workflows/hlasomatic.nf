@@ -4,6 +4,7 @@
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
 include { HLAHD                  } from '../modules/local/hlahd'
+include { HAPSTER                } from '../modules/local/hapster'
 include { BWA_INDEX              } from '../modules/nf-core/bwa/index/main'
 include { BWA_MEM                } from '../modules/nf-core/bwa/mem/main'
 include { NOVOALIGN              } from '../modules/local/novoalign'
@@ -112,7 +113,51 @@ workflow HLASOMATIC {
 
     ch_versions = ch_versions.mix(HLAHD.out.versions.first())
 
-    
+    //
+    // MODULE: Run Hapster (full HLA somatic mutation calling pipeline)
+    // Conditional on params.run_hapster - runs Hapster's own Mutect2 + kmer filtering
+    //
+    if (params.run_hapster) {
+        // Prepare Hapster reference and extraction regions
+        ch_hapster_refs = Channel.value(file(params.hapster_refs, checkIfExists: true))
+        ch_hapster_regions = Channel.value(file(params.hapster_extraction_regions, checkIfExists: true))
+
+        // Join samplesheet BAMs with HLAHD calls by patient_id
+        ch_hapster_bams = ch_samplesheet.map { row ->
+            def meta = row[0]
+            def normal_bam = row[1]
+            def normal_bai = row[2]
+            def tumor_bam = row[3]
+            def tumor_bai = row[4]
+            [meta.id, meta, tumor_bam, tumor_bai, normal_bam, normal_bai]
+        }
+
+        ch_hapster_hla = HLAHD.out.hla_calls.map { meta, calls ->
+            def patient_id = meta.id.replace('_normal', '')
+            [patient_id, meta, calls]
+        }
+
+        ch_hapster_input = ch_hapster_bams
+            .join(ch_hapster_hla, by: 0)
+            .map { patient_id, sample_meta, tumor_bam, tumor_bai, normal_bam, normal_bai, hla_meta, hla_calls ->
+                [sample_meta, tumor_bam, tumor_bai, normal_bam, normal_bai, hla_meta, hla_calls]
+            }
+
+        HAPSTER (
+            ch_hapster_input.map { meta, tumor_bam, tumor_bai, normal_bam, normal_bai, hla_meta, hla_calls ->
+                [meta, tumor_bam, tumor_bai, normal_bam, normal_bai]
+            },
+            ch_hapster_input.map { meta, tumor_bam, tumor_bai, normal_bam, normal_bai, hla_meta, hla_calls ->
+                [hla_meta, hla_calls]
+            },
+            ch_hapster_refs,
+            ch_hapster_regions
+        )
+
+        ch_versions = ch_versions.mix(HAPSTER.out.versions.first())
+    }
+
+
     //
     // Create HLA reference fastas and index them
     //
@@ -594,6 +639,8 @@ workflow HLASOMATIC {
     strelka_indels = STRELKA_SOMATIC.out.vcf_indels  // channel: Per-allele Strelka indel VCF files
     allele_bams    = EXTRACT_ALLELE_BAM.out.bam     // channel: Per-allele BAM files
     combined_vcfs  = COMBINE_ALLELE_VCFS.out.vcf    // channel: Per-sample combined VCF files
+    hapster_somatic_vcf           = params.run_hapster ? HAPSTER.out.somatic_vcf : Channel.empty()
+    hapster_somatic_kmer_filtered = params.run_hapster ? HAPSTER.out.somatic_vcf_kmer_filtered : Channel.empty()
 
 }
 
