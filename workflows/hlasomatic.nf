@@ -196,7 +196,7 @@ workflow HLASOMATIC {
     novo_index    = NOVOINDEX.out.index
 
     GATK4_CREATESEQUENCEDICTIONARY (
-        ch_reference.map { fasta -> [[id: 'reference'], fasta] }
+        CREATE_HLA_REFERENCE.out.hla_reference
     )
 
 
@@ -348,16 +348,44 @@ workflow HLASOMATIC {
     ch_tumor_normal_pairs.count().view { "Number of tumor-normal-allele pairs: $it" }
     // ch_tumor_normal_pairs.view { "Tumor-normal-allele pairs: $it" }
 
+    // Key patient-specific reference files by sample_id for Mutect2/FilterMutectCalls
+    ch_hla_ref_for_mutect = CREATE_HLA_REFERENCE.out.hla_reference
+        .map { meta, fasta -> [meta.id.replace('_normal', ''), meta, fasta] }
+
+    ch_hla_fai_for_mutect = SAMTOOLS_FAIDX.out.fai
+        .map { meta, fai -> [meta.id.replace('_normal', ''), meta, fai] }
+
+    ch_hla_dict_for_mutect = GATK4_CREATESEQUENCEDICTIONARY.out.dict
+        .map { meta, dict -> [meta.id.replace('_normal', ''), meta, dict] }
+
+    // Join tumor-normal pairs with patient-specific reference
+    ch_mutect_input = ch_tumor_normal_pairs
+        .map { meta, tumor_bam, tumor_bai, normal_bam, normal_bai ->
+            [meta.sample_id, meta, tumor_bam, tumor_bai, normal_bam, normal_bai]
+        }
+        .combine(ch_hla_ref_for_mutect, by: 0)
+        .combine(ch_hla_fai_for_mutect, by: 0)
+        .combine(ch_hla_dict_for_mutect, by: 0)
+        .map { sample_id, meta, tumor_bam, tumor_bai, normal_bam, normal_bai, ref_meta, fasta, fai_meta, fai, dict_meta, dict ->
+            [meta, tumor_bam, tumor_bai, normal_bam, normal_bai, fasta, fai, dict]
+        }
+
     //
     // MODULE: Run Mutect2 for somatic mutation calling
     //
     GATK4_MUTECT2 (
-        ch_tumor_normal_pairs.map { meta, tumor_bam, tumor_bai, normal_bam, normal_bai ->
+        ch_mutect_input.map { meta, tumor_bam, tumor_bai, normal_bam, normal_bai, fasta, fai, dict ->
             [meta, [tumor_bam, normal_bam], [tumor_bai, normal_bai], []]
         },
-        ch_reference.map { fasta -> [[id: 'reference'], fasta] },
-        ch_reference_fai.map { fai -> [[id: 'reference'], fai] },
-        GATK4_CREATESEQUENCEDICTIONARY.out.dict.map { meta, dict -> [[id: 'reference'], dict] },
+        ch_mutect_input.map { meta, tumor_bam, tumor_bai, normal_bam, normal_bai, fasta, fai, dict ->
+            [meta, fasta]
+        },
+        ch_mutect_input.map { meta, tumor_bam, tumor_bai, normal_bam, normal_bai, fasta, fai, dict ->
+            [meta, fai]
+        },
+        ch_mutect_input.map { meta, tumor_bam, tumor_bai, normal_bam, normal_bai, fasta, fai, dict ->
+            [meta, dict]
+        },
         [],
         [],
         [],
@@ -384,11 +412,31 @@ workflow HLASOMATIC {
         ]
     }
 
+    // Join FilterMutectCalls input with patient-specific reference
+    ch_filtermutect_with_ref = ch_filtermutect_in
+        .map { meta, vcf, tbi, stats, ob, seg, cont, cont_est ->
+            [meta.sample_id, meta, vcf, tbi, stats, ob, seg, cont, cont_est]
+        }
+        .combine(ch_hla_ref_for_mutect, by: 0)
+        .combine(ch_hla_fai_for_mutect, by: 0)
+        .combine(ch_hla_dict_for_mutect, by: 0)
+        .map { sample_id, meta, vcf, tbi, stats, ob, seg, cont, cont_est, ref_meta, fasta, fai_meta, fai, dict_meta, dict ->
+            [meta, vcf, tbi, stats, ob, seg, cont, cont_est, fasta, fai, dict]
+        }
+
     GATK4_FILTERMUTECTCALLS(
-        ch_filtermutect_in,
-        ch_reference.map { fasta -> [[id: 'reference'], fasta] },
-        ch_reference_fai.map { fai -> [[id: 'reference'], fai] },
-        GATK4_CREATESEQUENCEDICTIONARY.out.dict.map { meta, dict -> [[id: 'reference'], dict] }
+        ch_filtermutect_with_ref.map { meta, vcf, tbi, stats, ob, seg, cont, cont_est, fasta, fai, dict ->
+            [meta, vcf, tbi, stats, ob, seg, cont, cont_est]
+        },
+        ch_filtermutect_with_ref.map { meta, vcf, tbi, stats, ob, seg, cont, cont_est, fasta, fai, dict ->
+            [meta, fasta]
+        },
+        ch_filtermutect_with_ref.map { meta, vcf, tbi, stats, ob, seg, cont, cont_est, fasta, fai, dict ->
+            [meta, fai]
+        },
+        ch_filtermutect_with_ref.map { meta, vcf, tbi, stats, ob, seg, cont, cont_est, fasta, fai, dict ->
+            [meta, dict]
+        }
     )
 
     //
