@@ -13,8 +13,6 @@ process FILTER_ALLELE_BAM {
     output:
     tuple val(meta), path("${prefix}.filtered.bam"), path("${prefix}.filtered.bam.bai"), emit: bam
     path "${prefix}.filter_stats.txt", emit: stats
-    path "versions.yml", emit: versions
-
     when:
     task.ext.when == null || task.ext.when
 
@@ -98,9 +96,5 @@ EOF
     # Index the filtered BAM
     samtools index ${prefix}.filtered.bam
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        samtools: \$(echo \$(samtools --version 2>&1) | sed 's/^.*samtools //; s/Using.*\$//')
-    END_VERSIONS
     """
 }

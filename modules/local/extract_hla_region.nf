@@ -13,8 +13,6 @@ process EXTRACT_HLA_REGION {
     output:
     tuple val(meta), path("${prefix}.hla_region.bam"), path("${prefix}.hla_region.bam.bai"), emit: bam
     path "${prefix}.hla_stats.txt", emit: stats
-    path "versions.yml", emit: versions
-
     when:
     task.ext.when == null || task.ext.when
 
@@ -82,9 +80,5 @@ EOF
 
     cat ${prefix}.hla_stats.txt
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        samtools: \$(echo \$(samtools --version 2>&1) | sed 's/^.*samtools //; s/Using.*\$//')
-    END_VERSIONS
     """
 }

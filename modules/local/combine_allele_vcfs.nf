@@ -12,8 +12,6 @@ process COMBINE_ALLELE_VCFS {
 
     output:
     tuple val(meta_out), path("${prefix}.combined.vcf.gz"), path("${prefix}.combined.vcf.gz.tbi"), emit: vcf
-    path "versions.yml", emit: versions
-
     when:
     task.ext.when == null || task.ext.when
 
@@ -92,9 +90,5 @@ process COMBINE_ALLELE_VCFS {
     echo "Variants per allele:" >> ${prefix}.stats.txt
     bcftools query -f '%INFO/HLA_ALLELE\\n' ${prefix}.combined.vcf.gz | sort | uniq -c >> ${prefix}.stats.txt
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        bcftools: \$(bcftools --version 2>&1 | head -n1 | sed 's/^.*bcftools //; s/ .*\$//')
-    END_VERSIONS
     """
 }

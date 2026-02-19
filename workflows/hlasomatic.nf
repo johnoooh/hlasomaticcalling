@@ -88,7 +88,7 @@ workflow HLASOMATIC {
     EXTRACT_HLA_REGION (
         ch_all_bams
     )
-    ch_versions = ch_versions.mix(EXTRACT_HLA_REGION.out.versions.first())
+    // ch_versions = ch_versions.mix(EXTRACT_HLA_REGION.out.versions.first())
 
     //
     // Convert HLA region BAMs to FASTQ for processing
@@ -304,7 +304,7 @@ workflow HLASOMATIC {
     EXTRACT_ALLELE_BAM (
         ch_tumor_for_extraction.mix(ch_normal_for_extraction)
     )
-    ch_versions = ch_versions.mix(EXTRACT_ALLELE_BAM.out.versions.first())
+    // ch_versions = ch_versions.mix(EXTRACT_ALLELE_BAM.out.versions.first())
 
     //
     // MODULE: Filter per-allele BAMs (Polysolver-style NM + indel event filter)
@@ -313,7 +313,7 @@ workflow HLASOMATIC {
     FILTER_ALLELE_BAM (
         EXTRACT_ALLELE_BAM.out.bam
     )
-    ch_versions = ch_versions.mix(FILTER_ALLELE_BAM.out.versions.first())
+    // ch_versions = ch_versions.mix(FILTER_ALLELE_BAM.out.versions.first())
 
     // Separate tumor and normal per-allele BAMs (using filtered BAMs)
     ch_tumor_allele_bams = FILTER_ALLELE_BAM.out.bam
@@ -535,7 +535,7 @@ workflow HLASOMATIC {
             ch_strelka_indels_per_sample
         )
     )
-    ch_versions = ch_versions.mix(COMBINE_ALLELE_VCFS.out.versions.first())
+    // ch_versions = ch_versions.mix(COMBINE_ALLELE_VCFS.out.versions.first())
 
     //
     // Prepare combined VCFs for SomaticCombineChannel

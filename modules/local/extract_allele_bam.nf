@@ -12,8 +12,6 @@ process EXTRACT_ALLELE_BAM {
 
     output:
     tuple val(meta_out), path("${prefix}.${allele_safe}.bam"), path("${prefix}.${allele_safe}.bam.bai"), emit: bam
-    path "versions.yml", emit: versions
-
     when:
     task.ext.when == null || task.ext.when
 
@@ -62,9 +60,5 @@ process EXTRACT_ALLELE_BAM {
     # Index the BAM
     samtools index ${prefix}.${allele_safe}.bam
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        samtools: \$(echo \$(samtools --version 2>&1) | sed 's/^.*samtools //; s/Using.*\$//')
-    END_VERSIONS
     """
 }
