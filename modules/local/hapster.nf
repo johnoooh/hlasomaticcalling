@@ -2,8 +2,8 @@ process HAPSTER {
     tag "${meta.id}"
     label 'process_high'
 
-    container = "orgeraj/hapster:1.0.1"
-    scratch = true
+    container "docker.io/orgeraj/hapster:1.0.1"
+    scratch true
 
     cpus = { 8 * task.attempt }
     memory = { 48.GB * task.attempt }

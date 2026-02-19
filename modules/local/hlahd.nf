@@ -3,8 +3,8 @@ process HLAHD {
     // label 'process_medium'
 
     // container = "cmopipeline/hlahd:1.4"
-    container = "orgeraj/hlahd:1.7.1"
-    scratch = true
+    container "docker.io/orgeraj/hlahd:1.7.1"
+    scratch true
 
     cpus = { 8 * task.attempt }
     memory = 5.GB

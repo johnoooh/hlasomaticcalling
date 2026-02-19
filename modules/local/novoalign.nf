@@ -7,7 +7,7 @@ process NOVOALIGN {
     label 'process_high'
 
     conda "bioconda::novoalign=4.02.02 bioconda::samtools=1.17"
-    container "cmopipeline/lohhla:1.1.7"
+    container "docker.io/cmopipeline/lohhla:1.1.7"
 
     input:
     tuple val(meta), path(reads)
