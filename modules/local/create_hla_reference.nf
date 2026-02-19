@@ -10,8 +10,6 @@ process CREATE_HLA_REFERENCE {
     input:
     tuple val(meta), path(hla_calls)
     path reference_fasta
-    path genome_fasta
-    path genome_fasta_fai
 
     output:
     tuple val(meta), path("${prefix}_hla_reference.fasta"), emit: hla_reference
@@ -102,112 +100,61 @@ def create_personalized_hla_fasta(alleles_to_extract, full_hla_fasta_path, outpu
     return found_alleles
 
 
-def append_decoy_sequences(output_fasta_path, genome_fasta_path):
+def append_imgt_decoys(output_fasta_path, imgt_fasta_path, typed_genes):
     \"\"\"
-    Append non-classical HLA gene and pseudogene sequences from the genome
-    reference as decoy contigs. These act as read sinks to prevent paralog
-    reads (HLA-E, F, G, H, J, K, L) from contaminating classical allele
-    alignments and producing false positive somatic mutation calls.
+    Append one representative decoy allele per non-typed HLA gene from the
+    IMGT/HLA reference. This covers ALL HLA genes (Class I non-classical,
+    Class II, MIC, pseudogenes, etc.) as read sinks to prevent cross-gene
+    contamination of A/B/C alignments.
+
+    For each gene not in the patient's typed set, picks the first *01:01
+    allele (or first available) as the representative decoy.
     \"\"\"
-    # Decoy regions for GRCh37/hg19 (no chr prefix)
-    decoy_regions_grch37 = {
-        "HLA_E_decoy": ("6", 30457244, 30461982),
-        "HLA_F_decoy": ("6", 29690552, 29706305),
-        "HLA_G_decoy": ("6", 29794744, 29798902),
-        "HLA_H_decoy": ("6", 29855350, 29858259),
-        "HLA_J_decoy": ("6", 29974360, 29977733),
-        "HLA_K_decoy": ("6", 29894236, 29897009),
-        "HLA_L_decoy": ("6", 30227339, 30234728),
-    }
+    imgt = pysam.FastaFile(imgt_fasta_path)
+    all_refs = list(imgt.references)
 
-    # Decoy regions for GRCh38/hg38 (chr prefix)
-    decoy_regions_hg38 = {
-        "HLA_E_decoy": ("chr6", 30489503, 30494205),
-        "HLA_F_decoy": ("chr6", 29722738, 29738528),
-        "HLA_G_decoy": ("chr6", 29826967, 29831125),
-        "HLA_H_decoy": ("chr6", 29887752, 29890482),
-        "HLA_J_decoy": ("chr6", 30006606, 30009539),
-        "HLA_K_decoy": ("chr6", 29926459, 29929232),
-        "HLA_L_decoy": ("chr6", 30259562, 30266951),
-    }
+    # Group alleles by gene (first field before '_')
+    from collections import defaultdict
+    gene_alleles = defaultdict(list)
+    for ref in all_refs:
+        gene = ref.split("_")[0]
+        gene_alleles[gene].append(ref)
 
-    genome = pysam.FastaFile(genome_fasta_path)
-    chroms = set(genome.references)
-
-    # Auto-detect genome build from chromosome naming convention
-    if "chr6" in chroms:
-        build = "hg38"
-        decoy_regions = decoy_regions_hg38
-    elif "6" in chroms:
-        build = "grch37"
-        decoy_regions = decoy_regions_grch37
-    else:
-        print("WARNING: Cannot detect genome build (neither 'chr6' nor '6' found). Skipping decoys.")
-        genome.close()
-        return
-
-    print(f"Detected genome build: {build}")
+    typed_upper = set(g.upper() for g in typed_genes)
     decoys_added = 0
 
     with open(output_fasta_path, 'a') as outfile:
-        for name, (chrom, start, end) in decoy_regions.items():
-            try:
-                seq = genome.fetch(chrom, start, end)
-                if len(seq) > 0:
-                    outfile.write(f">{name}\\n{seq}\\n")
-                    decoys_added += 1
-                    print(f"Added decoy: {name} ({chrom}:{start}-{end}, {len(seq)} bp)")
-                else:
-                    print(f"WARNING: Empty sequence for {name} ({chrom}:{start}-{end})")
-            except Exception as e:
-                print(f"WARNING: Could not extract {name} ({chrom}:{start}-{end}): {e}")
+        for gene in sorted(gene_alleles.keys()):
+            if gene.upper() in typed_upper:
+                continue
 
-    genome.close()
-    print(f"Added {decoys_added} decoy sequences to reference")
+            candidates = gene_alleles[gene]
+            # Prefer *01:01 (i.e. gene_01_01) allele as representative
+            chosen = None
+            for allele in candidates:
+                # Match gene_01_01 prefix (any trailing fields ok)
+                if allele.startswith(f"{gene}_01_01"):
+                    chosen = allele
+                    break
+            if chosen is None:
+                chosen = candidates[0]
 
+            seq = imgt.fetch(chosen)
+            decoy_name = f"{chosen}_decoy"
+            outfile.write(f">{decoy_name}\\n{seq}\\n")
+            decoys_added += 1
+            print(f"Added decoy: {decoy_name} ({len(seq)} bp)")
 
-def append_hla_y_decoy(output_fasta_path):
-    \"\"\"
-    HLA-Y is absent from GRCh37/GRCh38 genome assemblies (71-87% of haplotypes
-    carry the deletion). Add HLA-Y CDS from IMGT/HLA as an explicit decoy to
-    prevent HLA-Y reads from contaminating HLA-A alignments, especially at
-    CDS position 144 where Y differs from A.
-    Source: IMGT/HLA Y*01:01:01:01 (HLA:HLA13320), 1098 bp
-    \"\"\"
-    hla_y_cds = (
-        "ATGGCGGTCGTGGCGCCCCGAACCCTCCTCCTGCTACTCTCGGGGGCCCTGGCCCTGACC"
-        "CAGACCTGGGCGGGCTCCCACTCCATGAGGTATTTCTCCACATCCGTGTCCCGGCCCGGC"
-        "AGTGGAGAGCCCCGCTTCATCGCAGTGGGCTACGTGGACGACACGCAGTTCGTGCGGTTC"
-        "GACAGCGACGCCGCGAGCCAGAGGATGGAGCCGCGGGCGCCGTGGATGGAGCAGGAGGAG"
-        "CCGGAGTATTGGGACCGGCAGACACAGATCTCCAAGACCAACGCACAGATTGACCTAGAG"
-        "AGCCTGCGGATCGCGCTCCGCTACTACAACCAGAGCGAGGCCGGTTCTCACACCATCCAG"
-        "AGGATGTCTGGCTGCGACGTGGGGTCGGACGGGCGCTTCCTCCGCGGGTACCGGCAGGAC"
-        "GCCTACGACGGCAAGGATTACATCGCCCTGAACGAGGACCTGCGCTCTTGGACCGCGGCG"
-        "GACATGGCGGCTCAGATCACCCAGCGCAAGTGGGAGGCGGCCCGTCAGGCGGAGCAGTTG"
-        "AGAGCCTACCTGGAGGGCGAGTGCATGGAGTGGCTCCGCAGATACCTGGAGAACGGGAAG"
-        "GAGACGCTGCAGCGCACGGACGCCCCCAAGACGCATATGACTCACCACGCTGTCTCTGAC"
-        "AATGAGGCCACCCTGAGGTGCTGAGCCCTGAGCTTCTACCCTGCGGAGATCACACTGACC"
-        "TGGCAGCGGGATGGGGAGGACCAGACCCAGGACACGGAGCTCGTGGAGACCAGGCCTGCA"
-        "GGGGATGGAATCTTCCAGAAGTGGGCGGCTGTGGTGGTGCCTTCTGGAGAGGAGCAGAGA"
-        "TACACCTGCCATGTGCAGCATGAGGGTCTGCCCAAGCCCCTCACCCTGAGATGGGAGCCG"
-        "TCTTCCCATCCCACCATCCCCATCGTGGGCATCCTTGCTGGCCTGGTTCTCTTTGGAGCT"
-        "GTGATCGCTGGAGCTGTGGTCGCTGCTGTGATGTGGAGGAGGAAGAGCTCAGATAGAAAA"
-        "GGAGGGAGCTACTCTCAGGCTGCAAGCAGTGACATTGCCCAGGGCTCTGATGTGTCTCTC"
-        "ACAGCTTGTAAAGTGTGA"
-    )
-    with open(output_fasta_path, 'a') as f:
-        f.write(f">HLA_Y_decoy\\n{hla_y_cds}\\n")
-    print(f"Added HLA-Y decoy (Y*01:01, {len(hla_y_cds)} bp) - not in genome assembly")
+    imgt.close()
+    print(f"Added {decoys_added} IMGT-based decoy sequences to reference")
 
 
 # Step 1: Create personalized reference with patient's typed A/B/C alleles
 create_personalized_hla_fasta(alleles, "${reference_fasta}", "${prefix}_hla_reference.fasta")
 
-# Step 2: Append non-classical HLA decoy sequences from genome reference
-append_decoy_sequences("${prefix}_hla_reference.fasta", "${genome_fasta}")
-
-# Step 3: Append HLA-Y decoy (absent from genome assembly, sourced from IMGT/HLA)
-append_hla_y_decoy("${prefix}_hla_reference.fasta")
+# Step 2: Append IMGT-based decoy sequences for all non-typed HLA genes
+typed_genes = set(["A", "B", "C"])
+append_imgt_decoys("${prefix}_hla_reference.fasta", "${reference_fasta}", typed_genes)
 
 
 # Create versions file

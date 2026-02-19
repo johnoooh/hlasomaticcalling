@@ -54,10 +54,6 @@ workflow HLASOMATIC {
     ch_reference = Channel.value(file(params.fasta, checkIfExists: true))
     ch_reference_fai = Channel.value(file(params.fastafai, checkIfExists: true))
 
-    // Genome reference for extracting non-classical HLA decoy sequences
-    ch_genome_fasta = Channel.value(file(params.genome_fasta, checkIfExists: true))
-    ch_genome_fasta_fai = Channel.value(file(params.genome_fasta_fai, checkIfExists: true))
-
     //
     // Parse input samplesheet - now expects normal_bam, normal_bai, tumor_bam, tumor_bai
     //
@@ -166,9 +162,7 @@ workflow HLASOMATIC {
 
     CREATE_HLA_REFERENCE (
         ch_hla_calls,
-        ch_reference,
-        ch_genome_fasta,
-        ch_genome_fasta_fai
+        ch_reference
     )
     // CREATE_HLA_REFERENCE.out.hla_reference.view()
 
