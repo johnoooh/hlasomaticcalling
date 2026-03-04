@@ -40,6 +40,13 @@
                     "type": "string",
                     "description": "MultiQC report title. Printed as page header, used for filename if not otherwise specified.",
                     "fa_icon": "fas fa-file-signature"
+                },
+                "hla_samplesheet": {
+                    "type": "string",
+                    "format": "file-path",
+                    "description": "Path to CSV with pre-computed HLA typing (columns: patient,A1,A2,B1,B2,C1,C2,...). When provided, HLAHD is skipped.",
+                    "help_text": "Provide a CSV file with pre-typed HLA alleles to skip the HLAHD step. The 'patient' column must match the 'patient' column in the BAM samplesheet (--input). Allele format: HLA-A*02:01:01 or A*02:01:01.",
+                    "fa_icon": "fas fa-dna"
                 }
             }
         },

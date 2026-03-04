@@ -23,12 +23,13 @@ include { EXTRACT_ALLELE_BAM } from '../modules/local/extract_allele_bam'
 include { COMBINE_ALLELE_VCFS } from '../modules/local/combine_allele_vcfs'
 include { EXTRACT_HLA_REGION } from '../modules/local/extract_hla_region'
 include { FILTER_ALLELE_BAM } from '../modules/local/filter_allele_bam'
-
+include { HLA_FROM_SAMPLESHEET   } from '../modules/local/hla_from_samplesheet'
 
 include { SomaticCombineChannel } from '../modules/local/SomaticCombineChannel'
 include { GENOMENEXUS_VCF2MAF } from '../modules/msk/genomenexus/vcf2maf/main'
 include { MULTIQC                } from '../modules/nf-core/multiqc/main'
 include { paramsSummaryMap       } from 'plugin/nf-schema'
+include { samplesheetToList      } from 'plugin/nf-schema'
 include { paramsSummaryMultiqc   } from '../subworkflows/nf-core/utils_nfcore_pipeline'
 include { softwareVersionsToYAML } from '../subworkflows/nf-core/utils_nfcore_pipeline'
 include { methodsDescriptionText } from '../subworkflows/local/utils_nfcore_hlasomatic_pipeline'
@@ -101,13 +102,59 @@ workflow HLASOMATIC {
     //
     ch_normal_fastq = SAMTOOLS_FASTQ.out.fastq
         .filter { meta, fastq -> meta.sample_type == 'normal' }
-    
-    // ch_normal_fastq.view()
-    HLAHD (
-        ch_normal_fastq
-    )
 
-    ch_versions = ch_versions.mix(HLAHD.out.versions.first())
+    //
+    // MODULE: HLA typing — either from pre-typed samplesheet or run HLAHD
+    //
+    if (params.hla_samplesheet) {
+        // Validate that --input samplesheet includes 'patient' column when --hla_samplesheet is set.
+        // This is checked at channel level below, but we log a clear upfront warning.
+        log.info "INFO: --hla_samplesheet provided. HLAHD will be skipped. Ensure BAM samplesheet includes 'patient' column."
+
+        // Load pre-typed HLA alleles from samplesheet, keyed by patient
+        ch_hla_typed = Channel
+            .fromList(samplesheetToList(params.hla_samplesheet, "${projectDir}/assets/schema_hla_input.json"))
+            .map { row ->
+                // row[0] = meta (from patient column, via "meta": ["id"])
+                // row[1..6] = A1, A2, B1, B2, C1, C2 (always present — required by schema)
+                // row[7+] = optional P-group/metadata columns (may be absent/null)
+                def meta = row[0]
+                [meta, row[1], row[2], row[3], row[4], row[5], row[6]]
+            }
+
+        HLA_FROM_SAMPLESHEET(ch_hla_typed)
+        ch_versions = ch_versions.mix(HLA_FROM_SAMPLESHEET.out.versions.first())
+
+        // Join HLA calls (meta.id == patient) with normal BAM metas (meta.patient == patient)
+        // Result: ch_hla_calls carries correct meta with id = "{sample}_normal"
+        ch_normal_patient_map = ch_normal_bams
+            .map { meta, bam, bai ->
+                if (!meta.patient) {
+                    error "Sample '${meta.id}': meta.patient is null. When using --hla_samplesheet, the 'patient' column is required in the BAM samplesheet (--input)."
+                }
+                [meta.patient, meta]
+            }
+
+        ch_hla_calls = HLA_FROM_SAMPLESHEET.out.hla_calls
+            .map { hla_meta, calls -> [hla_meta.id, calls] }
+            .join(ch_normal_patient_map, by: 0, remainder: true)
+            .map { patient, calls, normal_meta ->
+                if (normal_meta == null) {
+                    log.warn "Patient '${patient}' in HLA samplesheet has no matching sample in BAM samplesheet — dropping."
+                    return null
+                }
+                if (calls == null) {
+                    log.warn "Patient '${patient}' in BAM samplesheet has no HLA entry in HLA samplesheet — dropping."
+                    return null
+                }
+                [normal_meta, calls]
+            }
+            .filter { it != null }
+    } else {
+        HLAHD(ch_normal_fastq)
+        ch_versions = ch_versions.mix(HLAHD.out.versions.first())
+        ch_hla_calls = HLAHD.out.hla_calls
+    }
 
     //
     // MODULE: Run Hapster (full HLA somatic mutation calling pipeline)
@@ -128,7 +175,7 @@ workflow HLASOMATIC {
             [meta.id, meta, tumor_bam, tumor_bai, normal_bam, normal_bai]
         }
 
-        ch_hapster_hla = HLAHD.out.hla_calls.map { meta, calls ->
+        ch_hapster_hla = ch_hla_calls.map { meta, calls ->
             def patient_id = meta.id.replace('_normal', '')
             [patient_id, meta, calls]
         }
@@ -157,7 +204,6 @@ workflow HLASOMATIC {
     //
     // Create HLA reference fastas and index them
     //
-    ch_hla_calls = HLAHD.out.hla_calls
     // ch_hla_calls.view()
 
     CREATE_HLA_REFERENCE (
@@ -674,7 +720,7 @@ workflow HLASOMATIC {
     multiqc_report = MULTIQC.out.report.toList() // channel: /path/to/multiqc_report.html
     versions       = ch_versions                 // channel: [ path(versions.yml) ]
     hla_region_stats = EXTRACT_HLA_REGION.out.stats // channel: HLA region extraction statistics
-    hla_calls      = HLAHD.out.hla_calls        // channel: HLA typing results
+    hla_calls      = ch_hla_calls               // channel: HLA typing results
     alleles_list   = PARSE_HLA_ALLELES.out.alleles_list // channel: Per-sample allele list
     mutect2_vcf    = GATK4_MUTECT2.out.vcf      // channel: Per-allele Mutect2 VCF files
     strelka_snvs   = STRELKA_SOMATIC.out.vcf_snvs    // channel: Per-allele Strelka SNV VCF files

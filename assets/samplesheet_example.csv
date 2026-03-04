@@ -1,1 +1,2 @@
-sample,normal_bam,normal_bai,tumor_bam,tumor_bai
+sample,normal_bam,normal_bai,tumor_bam,tumor_bai,patient
+P-0000302-T02-IM6,/path/to/normal.bam,/path/to/normal.bai,/path/to/tumor.bam,/path/to/tumor.bai,P-0000302

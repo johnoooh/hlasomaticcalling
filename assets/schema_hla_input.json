@@ -1,0 +1,104 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://raw.githubusercontent.com/nf-core/hlasomatic/master/assets/schema_hla_input.json",
+    "title": "nf-core/hlasomatic pipeline - HLA typing samplesheet schema",
+    "description": "Schema for pre-computed HLA typing provided with --hla_samplesheet",
+    "type": "array",
+    "items": {
+        "type": "object",
+        "properties": {
+            "patient": {
+                "type": "string",
+                "description": "Patient or subject identifier used as the join key to link pre-typed HLA alleles to samples in the main samplesheet",
+                "pattern": "^\\S+$",
+                "errorMessage": "Patient ID must be provided and cannot contain spaces",
+                "meta": ["id"]
+            },
+            "A1": {
+                "type": "string",
+                "description": "HLA-A allele 1 in format HLA-A*02:01:01 or A*02:01:01",
+                "pattern": "^\\S+$",
+                "errorMessage": "HLA-A allele 1 must be provided and cannot contain spaces"
+            },
+            "A2": {
+                "type": "string",
+                "description": "HLA-A allele 2 in format HLA-A*02:01:01 or A*02:01:01",
+                "pattern": "^\\S+$",
+                "errorMessage": "HLA-A allele 2 must be provided and cannot contain spaces"
+            },
+            "B1": {
+                "type": "string",
+                "description": "HLA-B allele 1 in format HLA-B*07:02:01 or B*07:02:01",
+                "pattern": "^\\S+$",
+                "errorMessage": "HLA-B allele 1 must be provided and cannot contain spaces"
+            },
+            "B2": {
+                "type": "string",
+                "description": "HLA-B allele 2 in format HLA-B*07:02:01 or B*07:02:01",
+                "pattern": "^\\S+$",
+                "errorMessage": "HLA-B allele 2 must be provided and cannot contain spaces"
+            },
+            "C1": {
+                "type": "string",
+                "description": "HLA-C allele 1 in format HLA-C*07:01:01 or C*07:01:01",
+                "pattern": "^\\S+$",
+                "errorMessage": "HLA-C allele 1 must be provided and cannot contain spaces"
+            },
+            "C2": {
+                "type": "string",
+                "description": "HLA-C allele 2 in format HLA-C*07:01:01 or C*07:01:01",
+                "pattern": "^\\S+$",
+                "errorMessage": "HLA-C allele 2 must be provided and cannot contain spaces"
+            },
+            "A1_PGROUP": {
+                "type": "string",
+                "description": "P-group designation for HLA-A allele 1 (e.g. A*02:01P). Optional.",
+                "pattern": "^\\S+$",
+                "errorMessage": "HLA-A allele 1 P-group cannot contain spaces"
+            },
+            "A2_PGROUP": {
+                "type": "string",
+                "description": "P-group designation for HLA-A allele 2 (e.g. A*02:01P). Optional.",
+                "pattern": "^\\S+$",
+                "errorMessage": "HLA-A allele 2 P-group cannot contain spaces"
+            },
+            "B1_PGROUP": {
+                "type": "string",
+                "description": "P-group designation for HLA-B allele 1 (e.g. B*07:02P). Optional.",
+                "pattern": "^\\S+$",
+                "errorMessage": "HLA-B allele 1 P-group cannot contain spaces"
+            },
+            "B2_PGROUP": {
+                "type": "string",
+                "description": "P-group designation for HLA-B allele 2 (e.g. B*07:02P). Optional.",
+                "pattern": "^\\S+$",
+                "errorMessage": "HLA-B allele 2 P-group cannot contain spaces"
+            },
+            "C1_PGROUP": {
+                "type": "string",
+                "description": "P-group designation for HLA-C allele 1 (e.g. C*07:01P). Optional.",
+                "pattern": "^\\S+$",
+                "errorMessage": "HLA-C allele 1 P-group cannot contain spaces"
+            },
+            "C2_PGROUP": {
+                "type": "string",
+                "description": "P-group designation for HLA-C allele 2 (e.g. C*07:01P). Optional.",
+                "pattern": "^\\S+$",
+                "errorMessage": "HLA-C allele 2 P-group cannot contain spaces"
+            },
+            "normal_sample": {
+                "type": "string",
+                "description": "Normal sample identifier that produced this HLA typing result. Optional; used for provenance tracking.",
+                "pattern": "^\\S+$",
+                "errorMessage": "Normal sample name cannot contain spaces"
+            },
+            "use_for_patient_level_genotype": {
+                "type": "string",
+                "description": "Flag indicating whether this row should be used for patient-level genotype aggregation. Optional.",
+                "pattern": "^\\S+$",
+                "errorMessage": "use_for_patient_level_genotype value cannot contain spaces"
+            }
+        },
+        "required": ["patient", "A1", "A2", "B1", "B2", "C1", "C2"]
+    }
+}

@@ -40,6 +40,13 @@
                 "exists": true,
                 "pattern": "^\\S+\\.(bai)$",
                 "errorMessage": "Tumor BAM index file must be provided, cannot contain spaces and must have extension '.bai'"
+            },
+            "patient": {
+                "type": "string",
+                "description": "Patient or subject identifier used to join pre-typed HLA alleles (--hla_samplesheet). Optional: only required when skipping HLAHD.",
+                "pattern": "^\\S+$",
+                "errorMessage": "Patient ID must not contain spaces",
+                "meta": ["patient"]
             }
         },
         "required": ["sample", "normal_bam", "normal_bai", "tumor_bam", "tumor_bai"]
