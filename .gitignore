@@ -27,6 +27,7 @@ results/
 docs/node_modules
 *.pyc
 A*/
+!assets/
 rerun*/
 sophia/
 storeDir/
