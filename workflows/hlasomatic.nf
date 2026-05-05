@@ -509,7 +509,13 @@ workflow HLASOMATIC {
             def key = groupKey([sample_id: sample_id, caller: 'mutect2'], count)
             [key, meta, vcf, tbi]
         }
-        .groupTuple()
+        .groupTuple(remainder: true)
+        .filter { key, metas, vcfs, tbis ->
+            if (vcfs.size() < key.getGroupSize()) {
+                log.warn "Sample ${key.sample_id} mutect2: only ${vcfs.size()}/${key.getGroupSize()} alleles produced VCFs — combining partial set."
+            }
+            vcfs.size() > 0
+        }
         .map { key, metas, vcfs, tbis ->
             def meta = [sample_id: key.sample_id, id: key.sample_id]
             [meta, key.caller, vcfs, tbis]
@@ -571,7 +577,13 @@ workflow HLASOMATIC {
             def key = groupKey([sample_id: sample_id, caller: 'strelka_snvs'], count)
             [key, meta, vcf, tbi]
         }
-        .groupTuple()
+        .groupTuple(remainder: true)
+        .filter { key, metas, vcfs, tbis ->
+            if (vcfs.size() < key.getGroupSize()) {
+                log.warn "Sample ${key.sample_id} strelka_snvs: only ${vcfs.size()}/${key.getGroupSize()} alleles produced VCFs — combining partial set."
+            }
+            vcfs.size() > 0
+        }
         .map { key, metas, vcfs, tbis ->
             def meta = [sample_id: key.sample_id, id: key.sample_id]
             [meta, key.caller, vcfs, tbis]
@@ -591,7 +603,13 @@ workflow HLASOMATIC {
             def key = groupKey([sample_id: sample_id, caller: 'strelka_indels'], count)
             [key, meta, vcf, tbi]
         }
-        .groupTuple()
+        .groupTuple(remainder: true)
+        .filter { key, metas, vcfs, tbis ->
+            if (vcfs.size() < key.getGroupSize()) {
+                log.warn "Sample ${key.sample_id} strelka_indels: only ${vcfs.size()}/${key.getGroupSize()} alleles produced VCFs — combining partial set."
+            }
+            vcfs.size() > 0
+        }
         .map { key, metas, vcfs, tbis ->
             def meta = [sample_id: key.sample_id, id: key.sample_id]
             [meta, key.caller, vcfs, tbis]
