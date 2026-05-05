@@ -506,26 +506,13 @@ workflow HLASOMATIC {
     ch_mutect_per_sample = ch_mutect_before_combine
         .combine(ch_allele_counts, by: 0)
         .map { sample_id, meta, vcf, tbi, count ->
-            // Include count in grouping key for independent completion
-            [sample_id, 'mutect2', count, meta, vcf, tbi]
+            def key = groupKey([sample_id: sample_id, caller: 'mutect2'], count)
+            [key, meta, vcf, tbi]
         }
-        .groupTuple(by: [0, 1, 2])  // Group by sample_id, caller, AND expected count
-        .map { sample_id, caller, count, metas, vcfs, tbis ->
-            // Debug: show what we got
-            println "DEBUG grouped mutect: sample=${sample_id}, count=${count}, vcfs.size=${vcfs.size()}"
-            [sample_id, caller, count, metas, vcfs, tbis]
-        }
-        .filter { sample_id, caller, count, metas, vcfs, tbis ->
-            // Only emit when we have all alleles for this sample
-            def pass = (vcfs.size() == count)
-            if (!pass) {
-                println "DEBUG filter blocked: sample=${sample_id}, expected=${count}, got=${vcfs.size()}"
-            }
-            return pass
-        }
-        .map { sample_id, caller, count, metas, vcfs, tbis ->
-            def meta = [sample_id: sample_id, id: sample_id]
-            [meta, caller, vcfs, tbis]
+        .groupTuple()
+        .map { key, metas, vcfs, tbis ->
+            def meta = [sample_id: key.sample_id, id: key.sample_id]
+            [meta, key.caller, vcfs, tbis]
         }
 
     //
@@ -581,15 +568,13 @@ workflow HLASOMATIC {
         }
         .combine(ch_allele_counts, by: 0)
         .map { sample_id, meta, vcf, tbi, count ->
-            [sample_id, 'strelka_snvs', count, meta, vcf, tbi]
+            def key = groupKey([sample_id: sample_id, caller: 'strelka_snvs'], count)
+            [key, meta, vcf, tbi]
         }
-        .groupTuple(by: [0, 1, 2])
-        .filter { sample_id, caller, count, metas, vcfs, tbis ->
-            vcfs.size() == count
-        }
-        .map { sample_id, caller, count, metas, vcfs, tbis ->
-            def meta = [sample_id: sample_id, id: sample_id]
-            [meta, caller, vcfs, tbis]
+        .groupTuple()
+        .map { key, metas, vcfs, tbis ->
+            def meta = [sample_id: key.sample_id, id: key.sample_id]
+            [meta, key.caller, vcfs, tbis]
         }
 
     //
@@ -603,15 +588,13 @@ workflow HLASOMATIC {
         }
         .combine(ch_allele_counts, by: 0)
         .map { sample_id, meta, vcf, tbi, count ->
-            [sample_id, 'strelka_indels', count, meta, vcf, tbi]
+            def key = groupKey([sample_id: sample_id, caller: 'strelka_indels'], count)
+            [key, meta, vcf, tbi]
         }
-        .groupTuple(by: [0, 1, 2])
-        .filter { sample_id, caller, count, metas, vcfs, tbis ->
-            vcfs.size() == count
-        }
-        .map { sample_id, caller, count, metas, vcfs, tbis ->
-            def meta = [sample_id: sample_id, id: sample_id]
-            [meta, caller, vcfs, tbis]
+        .groupTuple()
+        .map { key, metas, vcfs, tbis ->
+            def meta = [sample_id: key.sample_id, id: key.sample_id]
+            [meta, key.caller, vcfs, tbis]
         }
 
     //
